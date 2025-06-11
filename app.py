@@ -1,5 +1,5 @@
 import streamlit as st
-import pypdf
+from pypdf import PdfReader
 import google.generativeai as genai
 import io
 import json
