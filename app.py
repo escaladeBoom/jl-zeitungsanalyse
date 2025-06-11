@@ -1,5 +1,5 @@
 import streamlit as st
-import PyPDF2
+import pypdf
 import google.generativeai as genai
 import io
 import json
@@ -18,7 +18,7 @@ st.set_page_config(
 
 # Team-Zugangsdaten (in Produktion: externe Datenbank verwenden)
 TEAM_CREDENTIALS = {
-    "jl_team": st.secrets["JL_PASSWORD"]
+    "jl_team": "junge_liberale_2025"  # Passwort für alle Teammitglieder
 }
 
 # CSS für besseres Design
@@ -71,7 +71,7 @@ def setup_gemini_api(api_key: str):
 def extract_pdf_text(pdf_file) -> str:
     """PDF-Text extrahieren"""
     try:
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_file.read()))
+        pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_file.read()))
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text() + "\n"
