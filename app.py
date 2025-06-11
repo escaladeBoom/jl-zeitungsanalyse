@@ -18,7 +18,7 @@ st.set_page_config(
 
 # Team-Zugangsdaten (in Produktion: externe Datenbank verwenden)
 TEAM_CREDENTIALS = {
-    "jl_team": "junge_liberale_2025"  # Passwort für alle Teammitglieder
+    "jl_team": st.secrets["JL_PASSWORD"]
 }
 
 # CSS für besseres Design
@@ -71,7 +71,7 @@ def setup_gemini_api(api_key: str):
 def extract_pdf_text(pdf_file) -> str:
     """PDF-Text extrahieren"""
     try:
-        pdf_reader = pypdf.PdfReader(io.BytesIO(pdf_file.read()))
+        pdf_reader = PdfReader(io.BytesIO(pdf_file.read()))
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text() + "\n"
@@ -192,23 +192,36 @@ def show_dashboard():
                 del st.session_state[key]
             st.rerun()
     
-    # API Setup
-    with st.sidebar:
-        st.header("⚙️ API-Konfiguration")
-        api_key = st.text_input(
-            "Google Gemini API-Key:", 
-            type="password",
-            help="Kostenlos bei https://makersuite.google.com/app/apikey"
-        )
-        
+    # API Setup - versuche zuerst aus Secrets, dann Sidebar
+    api_key = None
+    
+    # Prüfe ob API-Key in Secrets gespeichert ist
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
         if api_key:
-            st.success("✅ API-Key gesetzt")
-        else:
-            st.warning("⚠️ API-Key benötigt")
-            st.info("📖 https://makersuite.google.com/app/apikey")
+            st.sidebar.success("✅ API-Key aus Konfiguration geladen")
+    except:
+        pass
+    
+    # Falls nicht in Secrets, dann Sidebar-Eingabe
+    if not api_key:
+        with st.sidebar:
+            st.header("⚙️ API-Konfiguration")
+            api_key = st.text_input(
+                "Google Gemini API-Key:", 
+                type="password",
+                help="Kostenlos bei https://makersuite.google.com/app/apikey"
+            )
+            
+            if api_key:
+                st.success("✅ API-Key gesetzt")
+                st.info("💡 Admin kann diesen Key dauerhaft in den App-Settings speichern")
+            else:
+                st.warning("⚠️ API-Key benötigt")
+                st.info("📖 https://makersuite.google.com/app/apikey")
     
     if not api_key:
-        st.warning("🔑 Bitte zuerst API-Key in der Sidebar eingeben!")
+        st.warning("🔑 API-Key benötigt! Entweder in Sidebar eingeben oder Admin kontaktieren.")
         return
     
     # Gemini API setup
