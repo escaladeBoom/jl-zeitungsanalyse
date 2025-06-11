@@ -17,8 +17,11 @@ st.set_page_config(
 )
 
 # Team-Zugangsdaten (in Produktion: externe Datenbank verwenden)
+
 TEAM_CREDENTIALS = {
-    "jl_team": "junge_liberale_2025"  # Passwort für alle Teammitglieder
+
+    "jl_team": st.secrets["JL_PASSWORD"]
+
 }
 
 # CSS für besseres Design
