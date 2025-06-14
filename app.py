@@ -788,85 +788,156 @@ def fetch_and_analyze_apps_script(web_app_url):
         # Zeige Dateien
         with st.expander("📋 Gefundene Dateien"):
             for file in files:
-                st.write(f"📄 {file.get('name', 'Unbekannt')}")
+                st.write(f"📄 {file.get('name', 'Unbekannt')} ({file.get('size', 0):,} Bytes)")
         
-        # Analyse starten
-        if st.button("🚀 Alle Dateien analysieren"):
+        # Container für Live-Updates
+        status_container = st.container()
+        
+        # Analyse-Button direkt sichtbar
+        if st.button("🚀 Alle Dateien analysieren", type="primary", key="analyze_all"):
+            
+            # Progress-Elemente
             progress_bar = st.progress(0)
             status_text = st.empty()
+            log_container = st.container()
             
             successful = 0
+            failed = 0
             all_analyses = []
+            
+            st.write("📊 Starte Analyse...")
             
             for idx, file in enumerate(files):
                 progress = (idx + 1) / len(files)
                 progress_bar.progress(progress)
-                status_text.text(f"Analysiere: {file.get('name', 'Datei')}")
                 
-                try:
-                    # Download über Apps Script
-                    response = requests.post(
-                        web_app_url,
-                        data={'fileId': file['id']}
-                    )
-                    
-                    if response.status_code != 200:
-                        st.error(f"Download-Fehler für {file.get('name')}: HTTP {response.status_code}")
-                        continue
-                    
-                    # Decode Base64
-                    try:
-                        pdf_content = base64.b64decode(response.text)
-                    except:
-                        st.error(f"Base64-Dekodierung fehlgeschlagen für {file.get('name')}")
-                        continue
-                        
-                    pdf_buffer = io.BytesIO(pdf_content)
-                    pdf_buffer.name = file.get('name', 'unbekannt.pdf')
-                    
-                    # Text extrahieren
-                    text = extract_pdf_text(pdf_buffer)
-                    
-                    if text.strip():
-                        # Analysieren
-                        analysis = analyze_with_gemini(text, api_key)
-                        
-                        # Speichern
-                        save_analysis_to_db(file.get('name'), analysis, text)
-                        
-                        all_analyses.append({
-                            'filename': file.get('name'),
-                            'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
-                            'analysis': analysis
-                        })
-                        
-                        successful += 1
-                        
-                except Exception as e:
-                    st.error(f"Fehler bei {file.get('name', 'Datei')}: {e}")
+                file_name = file.get('name', 'Unbekannt')
+                status_text.text(f"Verarbeite {idx + 1}/{len(files)}: {file_name}")
+                
+                with log_container:
+                    with st.expander(f"📄 {file_name}", expanded=True):
+                        try:
+                            # Schritt 1: Download
+                            st.write("⏳ Lade PDF herunter...")
+                            
+                            download_response = requests.post(
+                                web_app_url,
+                                data={'fileId': file['id']},
+                                timeout=30
+                            )
+                            
+                            if download_response.status_code != 200:
+                                st.error(f"❌ Download-Fehler: HTTP {download_response.status_code}")
+                                failed += 1
+                                continue
+                            
+                            # Check if response is JSON (error)
+                            if download_response.headers.get('content-type', '').startswith('application/json'):
+                                error_data = download_response.json()
+                                st.error(f"❌ Script-Fehler: {error_data.get('error', 'Unbekannter Fehler')}")
+                                failed += 1
+                                continue
+                            
+                            st.write(f"✅ Download erfolgreich ({len(download_response.content):,} Bytes)")
+                            
+                            # Schritt 2: Base64 Decode
+                            try:
+                                pdf_content = base64.b64decode(download_response.text)
+                                st.write(f"✅ Dekodierung erfolgreich ({len(pdf_content):,} Bytes)")
+                            except Exception as e:
+                                st.error(f"❌ Base64-Dekodierung fehlgeschlagen: {e}")
+                                failed += 1
+                                continue
+                            
+                            # Schritt 3: PDF Buffer erstellen
+                            pdf_buffer = io.BytesIO(pdf_content)
+                            pdf_buffer.name = file_name
+                            
+                            # Schritt 4: Text extrahieren
+                            st.write("⏳ Extrahiere Text aus PDF...")
+                            text = extract_pdf_text(pdf_buffer)
+                            
+                            if not text.strip():
+                                st.warning("⚠️ Kein Text im PDF gefunden")
+                                failed += 1
+                                continue
+                            
+                            st.write(f"✅ Text extrahiert ({len(text):,} Zeichen)")
+                            
+                            # Schritt 5: Analysieren
+                            st.write("🤖 Analysiere mit KI...")
+                            analysis = analyze_with_gemini(text, api_key)
+                            st.write("✅ Analyse abgeschlossen")
+                            
+                            # Schritt 6: Speichern
+                            if save_analysis_to_db(file_name, analysis, text):
+                                st.write("💾 In Datenbank gespeichert")
+                            
+                            all_analyses.append({
+                                'filename': file_name,
+                                'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
+                                'analysis': analysis
+                            })
+                            
+                            successful += 1
+                            st.success(f"✅ Erfolgreich analysiert!")
+                            
+                            # Kurze Pause für API Rate Limits
+                            time.sleep(1)
+                            
+                        except requests.Timeout:
+                            st.error("❌ Zeitüberschreitung beim Download")
+                            failed += 1
+                        except Exception as e:
+                            st.error(f"❌ Unerwarteter Fehler: {str(e)}")
+                            import traceback
+                            st.code(traceback.format_exc())
+                            failed += 1
             
-            # Ergebnis
+            # Finale Zusammenfassung
             progress_bar.progress(1.0)
-            status_text.text("✅ Analyse abgeschlossen!")
+            status_text.text("✅ Batch-Analyse abgeschlossen!")
             
-            st.success(f"Erfolgreich analysiert: {successful}/{len(files)} PDFs")
+            st.markdown("---")
+            st.success(f"""
+            ### 📊 Zusammenfassung:
+            - ✅ **Erfolgreich:** {successful} PDFs
+            - ❌ **Fehlgeschlagen:** {failed} PDFs
+            - 📁 **Gesamt:** {len(files)} PDFs
+            """)
             
-            # Bericht erstellen
+            # Bericht erstellen wenn Analysen vorhanden
             if all_analyses:
                 report = create_batch_report(all_analyses)
                 
-                with st.expander("📄 Analysebericht", expanded=True):
+                st.markdown("---")
+                with st.expander("📄 Gesamtbericht anzeigen", expanded=True):
                     st.markdown(report)
                 
-                st.download_button(
-                    label="📥 Bericht herunterladen",
-                    data=report,
-                    file_name=f"JL_Auto_Analyse_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-                    mime="text/markdown"
-                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        label="📥 Bericht als Markdown",
+                        data=report,
+                        file_name=f"JL_Batch_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                        mime="text/markdown"
+                    )
+                
+                with col2:
+                    # CSV Export
+                    df = pd.DataFrame(all_analyses)
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Ergebnisse als CSV",
+                        data=csv,
+                        file_name=f"JL_Analysen_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.warning("Keine erfolgreichen Analysen zum Exportieren")
                 
     except Exception as e:
-        st.error(f"Fehler: {e}")
+        st.error(f"Kritischer Fehler: {e}")
         import traceback
         st.code(traceback.format_exc())
 
