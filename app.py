@@ -13,9 +13,9 @@ import base64
 # Konfiguration mit Fallback
 def get_credentials():
     try:
-        return {"jl_team": st.secrets["JL_PASSWORD"]}
+        return {"juli_team": st.secrets["JL_PASSWORD"]}
     except:
-        return {"jl_team": "junge_liberale_2025"}  # Fallback für Testing
+        return {"juli_team": "junge_liberale_2025"}  # Fallback für Testing
 
 TEAM_CREDENTIALS = get_credentials()
 
@@ -331,7 +331,7 @@ def format_final_output(raw_output: str) -> str:
 
 def show_login():
     """Login-Seite anzeigen"""
-    st.title("🔐 JL Zeitungsanalyse - Login")
+    st.title("🔐 JuLis Zeitungsanalyse - Login")
     
     with st.form("login_form"):
         username = st.text_input("👤 Benutzername:")
@@ -346,7 +346,7 @@ def show_login():
             else:
                 st.error("❌ Falsche Anmeldedaten!")
     
-    st.info("💡 **Demo-Zugang:** jl_team / junge_liberale_2025")
+    st.info("💡 **Demo-Zugang:** juli_team / junge_liberale_2025")
 
 def analyze_tab():
     """Tab für neue Artikel-Analyse"""
@@ -413,7 +413,7 @@ def analyze_tab():
                     # Download-Option
                     st.download_button(
                         label="📥 Analyse als Markdown herunterladen",
-                        data=f"# JL Zeitungsanalyse - {pdf_file.name}\n\nDatum: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
+                        data=f"# JuLi Zeitungsanalyse - {pdf_file.name}\n\nDatum: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
                         file_name=f"JL_Analyse_{pdf_file.name.replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
                         mime="text/markdown"
                     )
@@ -1245,7 +1245,7 @@ def manual_batch_upload():
 
 def create_batch_report(analyses):
     """Erstelle Batch-Analyse Bericht"""
-    report = f"""# 🤖 JL BATCH-ANALYSE BERICHT
+    report = f"""# 🤖 JuLi BATCH-ANALYSE BERICHT
 
 **Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}
 **Anzahl Zeitungen:** {len(analyses)}
@@ -1284,7 +1284,7 @@ def create_batch_report(analyses):
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
+    st.title("📰 JuLi Zeitungsanalyse für Kommunalpolitik")
     st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
     
     # User Info & Logout
@@ -1316,7 +1316,7 @@ def main():
     
     # Page Config MUSS als allererstes kommen
     st.set_page_config(
-        page_title="JL Zeitungsanalyse",
+        page_title="JuLi Zeitungsanalyse",
         page_icon="📰",
         layout="wide"
     )
