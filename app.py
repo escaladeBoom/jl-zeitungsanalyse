@@ -10,9 +10,9 @@ import re
 # Konfiguration mit Fallback
 def get_credentials():
     try:
-        return {"juli_team": st.secrets["JL_PASSWORD"]}
+        return {"jl_team": st.secrets["JL_PASSWORD"]}
     except:
-        return {"juli_team": "junge_liberale_2025"}  # Fallback für Testing
+        return {"jl_team": "junge_liberale_2025"}  # Fallback für Testing
 
 TEAM_CREDENTIALS = get_credentials()
 
@@ -311,11 +311,14 @@ def format_final_output(raw_output: str) -> str:
     hohe_count = raw_output.count("⚡")
     
     # Füge Zusammenfassung hinzu
-    summary = f"""# 📰 ANALYSE-ERGEBNIS
+    summary = f"""# 📰 ANALYSE-ERGEBNIS - DESSAU-ROßLAU & SACHSEN-ANHALT
 
-**Gefunden:** {hoechste_count + hohe_count} relevante Artikel
+**Gefunden:** {hoechste_count + hohe_count} relevante lokale/regionale Artikel
 - 🔥 Höchste Priorität: {hoechste_count}
 - ⚡ Hohe Priorität: {hohe_count}
+
+🎯 **Fokus:** Nur Dessau-Roßlau und Sachsen-Anhalt
+❌ **Ignoriert:** Bundespolitik & internationale Themen
 
 ---
 
@@ -325,7 +328,7 @@ def format_final_output(raw_output: str) -> str:
 
 def show_login():
     """Login-Seite anzeigen"""
-    st.title("🔐 JuLi Zeitungsanalyse - Login")
+    st.title("🔐 JL Zeitungsanalyse - Login")
     
     with st.form("login_form"):
         username = st.text_input("👤 Benutzername:")
@@ -340,7 +343,7 @@ def show_login():
             else:
                 st.error("❌ Falsche Anmeldedaten!")
     
-    st.info("💡 **Demo-Zugang:** juli_team / junge_liberale_2025")
+    st.info("💡 **Demo-Zugang:** jl_team / junge_liberale_2025")
 
 def analyze_tab():
     """Tab für neue Artikel-Analyse"""
@@ -561,7 +564,7 @@ def stats_tab():
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.title("📰 JuLi Zeitungsanalyse für Kommunalpolitik")
+    st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
     st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
     
     # User Info & Logout
@@ -573,7 +576,7 @@ def main_app():
             st.rerun()
     
     # Tab-Navigation
-    tab1, tab2, tab3 = st.tabs(["📤 Neue Analyse", "🔍 Artikel-Suche", "📊 Statistiken"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Neue Analyse", "🔍 Artikel-Suche", "📊 Statistiken", "🤖 Automatisierung"])
     
     with tab1:
         analyze_tab()
@@ -583,13 +586,17 @@ def main_app():
         
     with tab3:
         stats_tab()
+    
+    with tab4:
+        # Importiere die Automatisierungs-Funktionen
+        automated_analysis_tab()
 
 def main():
     """Hauptfunktion mit Session State Management"""
     
     # Page Config MUSS als allererstes kommen
     st.set_page_config(
-        page_title="JuLi Zeitungsanalyse",
+        page_title="JL Zeitungsanalyse",
         page_icon="📰",
         layout="wide"
     )
