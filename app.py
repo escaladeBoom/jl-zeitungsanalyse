@@ -126,7 +126,7 @@ def analyze_with_gemini(text: str, api_key: str) -> str:
 def analyze_single_chunk(text: str, model) -> str:
     """Einzelnen Text-Chunk analysieren"""
     prompt = f"""
-    AUFTRAG: Analysiere diesen Zeitungstext und kategorisiere alle gefundenen Artikel für die Jungen Liberalen.
+    AUFTRAG: Analysiere diesen Zeitungstext und kategorisiere alle gefundenen Artikel für die Jungen Liberalen (JuLi).
 
     KATEGORIEN:
     🔥 HÖCHSTE PRIORITÄT (Sofort handeln):
@@ -135,7 +135,7 @@ def analyze_single_chunk(text: str, model) -> str:
     - Bildung (Schulen, Unis, Digitalisierung)
     - Verkehr & Infrastruktur (ÖPNV, Radwege, Straßen)
 
-    ⚡ HOHE PRIORITÄT (Wichtig für JL):
+    ⚡ HOHE PRIORITÄT (Wichtig für JuLi):
     - Digitalisierung & Innovation
     - Umwelt & Nachhaltigkeit (pragmatische Lösungen)
     - Bürgerbeteiligung & Demokratie
@@ -147,12 +147,33 @@ def analyze_single_chunk(text: str, model) -> str:
     - Soziales
     - Sonstiges
 
-    FORMAT:
-    Für jeden Artikel:
+    FORMAT - SORTIERT NACH PRIORITÄT:
+    
+    # 🔥 HÖCHSTE PRIORITÄT
     **[KATEGORIE]** - Überschrift
     📍 Kurze Zusammenfassung (1-2 Sätze)
-    🎯 JL-Relevanz: Warum wichtig für Junge Liberale
+    📄 Seite: [Seitennummer falls erkennbar]
+    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
     ---
+
+    # ⚡ HOHE PRIORITÄT  
+    **[KATEGORIE]** - Überschrift
+    📍 Kurze Zusammenfassung (1-2 Sätze)
+    📄 Seite: [Seitennummer falls erkennbar]
+    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
+    ---
+
+    # 📰 STANDARD
+    **[KATEGORIE]** - Überschrift
+    📍 Kurze Zusammenfassung (1-2 Sätze)
+    📄 Seite: [Seitennummer falls erkennbar]
+    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
+    ---
+
+    WICHTIG: 
+    - Gruppiere ALLE Artikel nach Prioritätsstufen
+    - Versuche Seitennummern zu identifizieren (z.B. "=== SEITE 3 ===" oder aus dem Kontext)
+    - Verwende "JuLi" statt "JL"
 
     TEXT:
     {text}
@@ -198,7 +219,7 @@ def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
         st.write(f"🔍 Analysiere Teil {i}/{len(chunks)}...")
         
         chunk_prompt = f"""
-        AUFTRAG: Analysiere diesen Zeitungstext-Teil und kategorisiere alle gefundenen Artikel für die Jungen Liberalen.
+        AUFTRAG: Analysiere diesen Zeitungstext-Teil und kategorisiere alle gefundenen Artikel für die Jungen Liberalen (JuLi).
         WICHTIG: Dies ist Teil {i} von {len(chunks)} - analysiere nur die vollständigen Artikel in diesem Teil.
 
         KATEGORIEN:
@@ -206,11 +227,14 @@ def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
         ⚡ HOHE PRIORITÄT: Digitalisierung & Innovation, Umwelt & Nachhaltigkeit, Bürgerbeteiligung & Demokratie, Jugendthemen
         📰 STANDARD: Kultur & Events, Sport, Soziales, Sonstiges
 
-        FORMAT:
+        FORMAT - NUR ARTIKEL AUFLISTEN (keine Gruppierung):
         **[KATEGORIE]** - Überschrift
         📍 Zusammenfassung
-        🎯 JL-Relevanz
+        📄 Seite: [Nummer falls erkennbar]
+        🎯 JuLi-Relevanz: [Begründung]
         ---
+
+        WICHTIG: Verwende "JuLi" statt "JL" und versuche Seitennummern zu extrahieren.
 
         TEXT TEIL {i}:
         {chunk}
@@ -219,22 +243,68 @@ def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
         try:
             response = model.generate_content(chunk_prompt)
             chunk_analysis = response.text
-            all_analyses.append(f"## 📄 TEIL {i}/{len(chunks)}\n\n{chunk_analysis}")
+            all_analyses.append(chunk_analysis)
         except Exception as e:
-            all_analyses.append(f"## 📄 TEIL {i}/{len(chunks)}\n\n❌ Fehler bei Teil {i}: {e}")
+            all_analyses.append(f"❌ Fehler bei Teil {i}: {e}")
     
-    # Alle Analysen zusammenfassen
+    # Alle Analysen nach Priorität sortieren
+    combined_text = '\n\n'.join(all_analyses)
+    
     final_analysis = f"""
 # 📰 VOLLSTÄNDIGE ZEITUNGSANALYSE
-*Analysiert in {len(chunks)} Teilen wegen Textlänge*
+*Analysiert in {len(chunks)} Teilen - Sortiert nach Priorität*
 
-{chr(10).join(all_analyses)}
+{sort_articles_by_priority(combined_text)}
 
 ---
 **📊 ZUSAMMENFASSUNG:** {len(chunks)} Teile analysiert, {len(text)} Zeichen Gesamttext
 """
     
     return final_analysis
+
+def sort_articles_by_priority(analysis_text: str) -> str:
+    """Sortiert Artikel aus der Analyse nach Priorität"""
+    try:
+        # Extrahiere alle Artikel aus dem Text
+        articles = analysis_text.split('---')
+        
+        hoechste = []
+        hohe = []
+        standard = []
+        
+        for article in articles:
+            article = article.strip()
+            if not article:
+                continue
+                
+            # Bestimme Priorität basierend auf Kategorien
+            if any(cat in article for cat in ['Kommunalpolitik', 'Wirtschaft & Gewerbe', 'Bildung', 'Verkehr & Infrastruktur']):
+                hoechste.append(article)
+            elif any(cat in article for cat in ['Digitalisierung & Innovation', 'Umwelt & Nachhaltigkeit', 'Bürgerbeteiligung & Demokratie', 'Jugendthemen']):
+                hohe.append(article)
+            else:
+                standard.append(article)
+        
+        # Zusammenbauen
+        result = ""
+        
+        if hoechste:
+            result += "# 🔥 HÖCHSTE PRIORITÄT\n\n"
+            result += "\n---\n".join(hoechste) + "\n\n"
+        
+        if hohe:
+            result += "# ⚡ HOHE PRIORITÄT\n\n"
+            result += "\n---\n".join(hohe) + "\n\n"
+        
+        if standard:
+            result += "# 📰 STANDARD\n\n"
+            result += "\n---\n".join(standard) + "\n\n"
+        
+        return result
+        
+    except Exception as e:
+        # Falls Sortierung fehlschlägt, gib ursprünglichen Text zurück
+        return f"📋 ARTIKEL-ANALYSE:\n\n{analysis_text}"
 
 def show_login():
     """Login-Seite anzeigen"""
