@@ -3,9 +3,12 @@ from pypdf import PdfReader
 import google.generativeai as genai
 import io
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import re
+import requests
+import time
+import base64
 
 # Konfiguration mit Fallback
 def get_credentials():
@@ -561,6 +564,330 @@ def stats_tab():
     timeline = df.groupby('datum_date').size().reset_index(name='Anzahl')
     if len(timeline) > 1:
         st.line_chart(timeline.set_index('datum_date'))
+
+def automated_analysis_tab():
+    """Tab für automatisierte Google Drive Analyse"""
+    st.header("🤖 Automatisierte Zeitungsanalyse")
+    
+    # Wähle Methode
+    method = st.selectbox(
+        "Wähle eine Integrationsmethode:",
+        [
+            "📱 Google Apps Script (Empfohlen für private Ordner)",
+            "📂 Öffentlicher Google Drive Ordner",
+            "📤 Manueller Batch-Upload"
+        ]
+    )
+    
+    if method == "📱 Google Apps Script (Empfohlen für private Ordner)":
+        apps_script_integration()
+    elif method == "📂 Öffentlicher Google Drive Ordner":
+        public_folder_integration()
+    else:
+        manual_batch_upload()
+
+def apps_script_integration():
+    """Integration über Google Apps Script für private Ordner"""
+    st.markdown("### 🔐 Private Ordner-Integration mit Google Apps Script")
+    
+    with st.expander("📖 Einrichtungsanleitung", expanded=True):
+        st.markdown("""
+        **So richtest du Google Apps Script ein:**
+        
+        1. **Öffne Google Drive** und gehe zu deinem Zeitungsordner
+        2. **Erstelle ein neues Apps Script**: Rechtsklick → Mehr → Google Apps Script
+        3. **Kopiere diesen Code ins Script:**
+        
+        ```javascript
+        function doGet(e) {
+          const folderId = 'DEINE_ORDNER_ID'; // Ersetze mit deiner Ordner-ID
+          
+          const folder = DriveApp.getFolderById(folderId);
+          const files = folder.getFilesByType(MimeType.PDF);
+          
+          const fileList = [];
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - 7); // Letzte 7 Tage
+          
+          while (files.hasNext()) {
+            const file = files.next();
+            if (file.getLastUpdated() > cutoffDate) {
+              fileList.push({
+                id: file.getId(),
+                name: file.getName(),
+                modified: file.getLastUpdated().toISOString()
+              });
+            }
+          }
+          
+          return ContentService
+            .createTextOutput(JSON.stringify(fileList))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+        
+        function doPost(e) {
+          const fileId = e.parameter.fileId;
+          const file = DriveApp.getFileById(fileId);
+          const content = file.getBlob().getBytes();
+          
+          return ContentService
+            .createTextOutput(Utilities.base64Encode(content))
+            .setMimeType(ContentService.MimeType.TEXT);
+        }
+        ```
+        
+        4. **Deploy**: Deploy → New Deployment → Web App → Execute as: Me → Access: Anyone
+        5. **Kopiere die Web App URL**
+        """)
+    
+    # Web App URL eingeben
+    web_app_url = st.text_input(
+        "Google Apps Script Web App URL:",
+        placeholder="https://script.google.com/macros/s/.../exec",
+        help="Die URL aus dem Deployment"
+    )
+    
+    if web_app_url:
+        if st.button("📂 Dateien abrufen", type="primary"):
+            fetch_and_analyze_apps_script(web_app_url)
+
+def fetch_and_analyze_apps_script(web_app_url):
+    """Hole und analysiere Dateien über Apps Script"""
+    try:
+        # API Key prüfen
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        if not api_key:
+            st.error("❌ Gemini API Key fehlt in den Secrets!")
+            return
+        
+        # Dateien abrufen
+        with st.spinner("📂 Hole Dateiliste..."):
+            response = requests.get(web_app_url)
+            files = response.json()
+        
+        if not files:
+            st.warning("Keine Dateien gefunden")
+            return
+            
+        st.success(f"✅ {len(files)} PDF(s) gefunden")
+        
+        # Zeige Dateien
+        with st.expander("📋 Gefundene Dateien"):
+            for file in files:
+                st.write(f"📄 {file['name']}")
+        
+        # Analyse starten
+        if st.button("🚀 Alle Dateien analysieren"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            successful = 0
+            all_analyses = []
+            
+            for idx, file in enumerate(files):
+                progress = (idx + 1) / len(files)
+                progress_bar.progress(progress)
+                status_text.text(f"Analysiere: {file['name']}")
+                
+                try:
+                    # Download über Apps Script
+                    response = requests.post(
+                        web_app_url,
+                        data={'fileId': file['id']}
+                    )
+                    
+                    # Decode Base64
+                    pdf_content = base64.b64decode(response.text)
+                    pdf_buffer = io.BytesIO(pdf_content)
+                    pdf_buffer.name = file['name']
+                    
+                    # Text extrahieren
+                    text = extract_pdf_text(pdf_buffer)
+                    
+                    if text.strip():
+                        # Analysieren
+                        analysis = analyze_with_gemini(text, api_key)
+                        
+                        # Speichern
+                        save_analysis_to_db(file['name'], analysis, text)
+                        
+                        all_analyses.append({
+                            'filename': file['name'],
+                            'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
+                            'analysis': analysis
+                        })
+                        
+                        successful += 1
+                        
+                except Exception as e:
+                    st.error(f"Fehler bei {file['name']}: {e}")
+            
+            # Ergebnis
+            progress_bar.progress(1.0)
+            status_text.text("✅ Analyse abgeschlossen!")
+            
+            st.success(f"Erfolgreich analysiert: {successful}/{len(files)} PDFs")
+            
+            # Bericht erstellen
+            if all_analyses:
+                report = create_batch_report(all_analyses)
+                
+                with st.expander("📄 Analysebericht", expanded=True):
+                    st.markdown(report)
+                
+                st.download_button(
+                    label="📥 Bericht herunterladen",
+                    data=report,
+                    file_name=f"JL_Auto_Analyse_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                    mime="text/markdown"
+                )
+                
+    except Exception as e:
+        st.error(f"Fehler: {e}")
+
+def public_folder_integration():
+    """Integration für öffentliche Google Drive Ordner"""
+    st.markdown("### 📂 Öffentlicher Ordner (Vereinfachte Methode)")
+    
+    st.info("""
+    ⚠️ Diese Methode funktioniert nur mit öffentlich freigegebenen Ordnern!
+    
+    Für private Ordner nutze bitte die Google Apps Script Methode oben.
+    """)
+    
+    gdrive_url = st.text_input(
+        "Öffentlicher Google Drive Ordner URL:",
+        placeholder="https://drive.google.com/drive/folders/..."
+    )
+    
+    if gdrive_url:
+        st.warning("Diese Funktion ist noch nicht implementiert für private Ordner.")
+        st.info("Bitte nutze die Google Apps Script Methode oben!")
+
+def manual_batch_upload():
+    """Manueller Batch-Upload von mehreren PDFs"""
+    st.markdown("### 📤 Manueller Batch-Upload")
+    
+    # API Key prüfen
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    if not api_key:
+        st.error("❌ Gemini API Key fehlt in den Secrets!")
+        return
+    
+    # Mehrere PDFs hochladen
+    pdf_files = st.file_uploader(
+        "Wähle mehrere PDFs aus:",
+        type=['pdf'],
+        accept_multiple_files=True,
+        help="Du kannst mehrere Dateien gleichzeitig auswählen"
+    )
+    
+    if pdf_files:
+        st.success(f"✅ {len(pdf_files)} PDFs ausgewählt")
+        
+        # Liste anzeigen
+        with st.expander("📋 Ausgewählte Dateien"):
+            for pdf in pdf_files:
+                st.write(f"📄 {pdf.name} ({pdf.size:,} Bytes)")
+        
+        # Analyse starten
+        if st.button("🚀 Batch-Analyse starten", type="primary"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            successful = 0
+            all_analyses = []
+            
+            for idx, pdf_file in enumerate(pdf_files):
+                progress = (idx + 1) / len(pdf_files)
+                progress_bar.progress(progress)
+                status_text.text(f"Analysiere: {pdf_file.name}")
+                
+                try:
+                    # PDF lesen
+                    pdf_file.seek(0)
+                    text = extract_pdf_text(pdf_file)
+                    
+                    if text.strip():
+                        # Analysieren
+                        analysis = analyze_with_gemini(text, api_key)
+                        
+                        # Speichern
+                        save_analysis_to_db(pdf_file.name, analysis, text)
+                        
+                        all_analyses.append({
+                            'filename': pdf_file.name,
+                            'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
+                            'analysis': analysis
+                        })
+                        
+                        successful += 1
+                        
+                except Exception as e:
+                    st.error(f"Fehler bei {pdf_file.name}: {e}")
+            
+            # Ergebnis
+            progress_bar.progress(1.0)
+            status_text.text("✅ Batch-Analyse abgeschlossen!")
+            
+            st.success(f"""
+            ### 📊 Ergebnis:
+            - ✅ Erfolgreich: {successful} PDFs
+            - ❌ Fehlgeschlagen: {len(pdf_files) - successful} PDFs
+            """)
+            
+            # Bericht
+            if all_analyses:
+                report = create_batch_report(all_analyses)
+                
+                with st.expander("📄 Gesamtbericht", expanded=True):
+                    st.markdown(report)
+                
+                st.download_button(
+                    label="📥 Bericht herunterladen",
+                    data=report,
+                    file_name=f"JL_Batch_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                    mime="text/markdown"
+                )
+
+def create_batch_report(analyses):
+    """Erstelle Batch-Analyse Bericht"""
+    report = f"""# 🤖 JL BATCH-ANALYSE BERICHT
+
+**Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}
+**Anzahl Zeitungen:** {len(analyses)}
+
+---
+
+## 📊 ZUSAMMENFASSUNG
+
+"""
+    
+    # Zähle Prioritäten
+    total_highest = 0
+    total_high = 0
+    
+    for analysis_data in analyses:
+        total_highest += analysis_data['analysis'].count('🔥')
+        total_high += analysis_data['analysis'].count('⚡')
+    
+    report += f"""
+- 🔥 **Höchste Priorität gesamt:** {total_highest} Artikel
+- ⚡ **Hohe Priorität gesamt:** {total_high} Artikel
+- 📰 **Analysierte Zeitungen:** {len(analyses)}
+
+---
+
+## 📰 EINZELANALYSEN
+"""
+    
+    for analysis_data in analyses:
+        report += f"\n### 📄 {analysis_data['filename']}\n"
+        report += f"*Analysiert: {analysis_data['date']}*\n\n"
+        report += analysis_data['analysis']
+        report += "\n\n---\n"
+    
+    return report
 
 def main_app():
     """Hauptanwendung nach Login"""
