@@ -569,22 +569,219 @@ def automated_analysis_tab():
     """Tab für automatisierte Google Drive Analyse"""
     st.header("🤖 Automatisierte Zeitungsanalyse")
     
-    # Wähle Methode
-    method = st.selectbox(
-        "Wähle eine Integrationsmethode:",
-        [
-            "📱 Google Apps Script (Empfohlen für private Ordner)",
-            "📂 Öffentlicher Google Drive Ordner",
-            "📤 Manueller Batch-Upload"
-        ]
+    # Einfache Version - nur neueste PDF
+    st.markdown("### 📄 Neueste PDF automatisch analysieren")
+    
+    with st.expander("🔧 Google Apps Script einrichten"):
+        st.markdown("""
+        1. Öffne dein bestehendes Script oder erstelle ein neues
+        2. Lösche allen Code und füge diesen ein:
+        
+        ```javascript
+        const FOLDER_ID = '1X14miq8UeowPZT7AM4qEWp1sheUTQjI6'; // Deine Ordner-ID
+
+        function doGet(e) {
+          try {
+            const folder = DriveApp.getFolderById(FOLDER_ID);
+            const files = folder.getFilesByType(MimeType.PDF);
+            
+            let newestFile = null;
+            let newestDate = new Date(0);
+            
+            while (files.hasNext()) {
+              const file = files.next();
+              if (file.getLastUpdated() > newestDate) {
+                newestDate = file.getLastUpdated();
+                newestFile = file;
+              }
+            }
+            
+            if (newestFile) {
+              return ContentService
+                .createTextOutput(JSON.stringify({
+                  success: true,
+                  file: {
+                    id: newestFile.getId(),
+                    name: newestFile.getName(),
+                    modified: newestFile.getLastUpdated().toISOString()
+                  }
+                }))
+                .setMimeType(ContentService.MimeType.JSON);
+            } else {
+              return ContentService
+                .createTextOutput(JSON.stringify({
+                  success: false,
+                  error: "Keine PDFs gefunden"
+                }))
+                .setMimeType(ContentService.MimeType.JSON);
+            }
+          } catch (error) {
+            return ContentService
+              .createTextOutput(JSON.stringify({
+                success: false,
+                error: error.toString()
+              }))
+              .setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+
+        function doPost(e) {
+          try {
+            const fileId = e.parameter.fileId;
+            const file = DriveApp.getFileById(fileId);
+            const content = file.getBlob().getBytes();
+            return ContentService
+              .createTextOutput(Utilities.base64Encode(content))
+              .setMimeType(ContentService.MimeType.TEXT);
+          } catch (error) {
+            return ContentService
+              .createTextOutput(JSON.stringify({
+                success: false,
+                error: error.toString()
+              }))
+              .setMimeType(ContentService.MimeType.JSON);
+          }
+        }
+        ```
+        
+        3. Deploy → Update (oder New Deployment)
+        4. Kopiere die Web App URL
+        """)
+    
+    # URL Eingabe
+    web_app_url = st.text_input(
+        "Web App URL:",
+        value=st.session_state.get('web_app_url', ''),
+        placeholder="https://script.google.com/macros/s/.../exec"
     )
     
-    if method == "📱 Google Apps Script (Empfohlen für private Ordner)":
-        apps_script_integration()
-    elif method == "📂 Öffentlicher Google Drive Ordner":
-        public_folder_integration()
-    else:
-        manual_batch_upload()
+    if web_app_url:
+        st.session_state.web_app_url = web_app_url
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔍 Neueste PDF prüfen", type="primary"):
+                check_newest_pdf(web_app_url)
+        
+        with col2:
+            if st.button("🚀 Neueste PDF analysieren", type="secondary"):
+                analyze_newest_pdf(web_app_url)
+
+def check_newest_pdf(web_app_url):
+    """Zeige Info über die neueste PDF"""
+    try:
+        with st.spinner("Prüfe neueste PDF..."):
+            response = requests.get(web_app_url)
+            data = response.json()
+            
+            if data.get('success'):
+                file_info = data['file']
+                modified = datetime.fromisoformat(file_info['modified'].replace('Z', '+00:00'))
+                
+                st.success(f"""
+                ### 📄 Neueste PDF gefunden:
+                - **Name:** {file_info['name']}
+                - **Geändert:** {modified.strftime('%d.%m.%Y %H:%M')}
+                - **ID:** {file_info['id']}
+                """)
+                
+                # Prüfe ob bereits analysiert
+                df = load_article_database()
+                if not df.empty and file_info['name'] in df['pdf_name'].values:
+                    st.info("ℹ️ Diese PDF wurde bereits analysiert!")
+                else:
+                    st.warning("⚠️ Diese PDF wurde noch nicht analysiert!")
+                    
+            else:
+                st.error(f"Fehler: {data.get('error')}")
+                
+    except Exception as e:
+        st.error(f"Fehler: {e}")
+
+def analyze_newest_pdf(web_app_url):
+    """Analysiere nur die neueste PDF"""
+    try:
+        # API Key prüfen
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        if not api_key:
+            st.error("❌ Gemini API Key fehlt!")
+            return
+        
+        # Hole neueste PDF Info
+        with st.spinner("Hole neueste PDF..."):
+            response = requests.get(web_app_url)
+            data = response.json()
+            
+            if not data.get('success'):
+                st.error(f"Fehler: {data.get('error')}")
+                return
+            
+            file_info = data['file']
+            st.info(f"📄 Verarbeite: {file_info['name']}")
+        
+        # Download PDF
+        with st.spinner("Lade PDF herunter..."):
+            download_response = requests.post(
+                web_app_url,
+                data={'fileId': file_info['id']},
+                timeout=60
+            )
+            
+            if download_response.status_code != 200:
+                st.error(f"Download-Fehler: HTTP {download_response.status_code}")
+                return
+            
+            # Prüfe ob Fehler-JSON
+            try:
+                error_check = download_response.json()
+                if 'error' in error_check:
+                    st.error(f"Script-Fehler: {error_check['error']}")
+                    return
+            except:
+                # Kein JSON = gut (Base64 Content)
+                pass
+            
+            pdf_content = base64.b64decode(download_response.text)
+            st.success(f"✅ Download erfolgreich ({len(pdf_content):,} Bytes)")
+        
+        # PDF Buffer erstellen
+        pdf_buffer = io.BytesIO(pdf_content)
+        pdf_buffer.name = file_info['name']
+        
+        # Text extrahieren
+        with st.spinner("Extrahiere Text..."):
+            text = extract_pdf_text(pdf_buffer)
+            
+            if not text.strip():
+                st.error("❌ Kein Text im PDF gefunden!")
+                return
+        
+        # Analysieren
+        with st.spinner("🤖 KI analysiert Artikel..."):
+            analysis = analyze_with_gemini(text, api_key)
+        
+        # Speichern
+        if save_analysis_to_db(file_info['name'], analysis, text):
+            st.success("💾 In Database gespeichert!")
+        
+        # Ergebnis anzeigen
+        st.success("✅ Analyse abgeschlossen!")
+        st.markdown("---")
+        st.markdown(analysis)
+        
+        # Download
+        st.download_button(
+            label="📥 Analyse herunterladen",
+            data=f"# JL Zeitungsanalyse\n\n**Datei:** {file_info['name']}\n**Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
+            file_name=f"JL_Analyse_{file_info['name'].replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
+            mime="text/markdown"
+        )
+        
+    except Exception as e:
+        st.error(f"Fehler: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 def apps_script_integration():
     """Integration über Google Apps Script für private Ordner"""
