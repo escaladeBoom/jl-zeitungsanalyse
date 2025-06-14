@@ -550,12 +550,6 @@ def stats_tab():
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.set_page_config(
-        page_title="JL Zeitungsanalyse",
-        page_icon="📰",
-        layout="wide"
-    )
-    
     st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
     st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
     
@@ -582,7 +576,7 @@ def main_app():
 def main():
     """Hauptfunktion mit Session State Management"""
     
-    # Page Config
+    # Page Config MUSS als allererstes kommen
     st.set_page_config(
         page_title="JL Zeitungsanalyse",
         page_icon="📰",
