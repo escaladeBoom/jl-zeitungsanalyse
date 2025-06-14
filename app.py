@@ -596,49 +596,134 @@ def apps_script_integration():
         
         1. **Öffne Google Drive** und gehe zu deinem Zeitungsordner
         2. **Erstelle ein neues Apps Script**: Rechtsklick → Mehr → Google Apps Script
-        3. **Kopiere diesen Code ins Script:**
+        3. **Lösche allen vorhandenen Code und kopiere diesen Code:**
         
         ```javascript
         function doGet(e) {
-          const folderId = 'DEINE_ORDNER_ID'; // Ersetze mit deiner Ordner-ID
-          
-          const folder = DriveApp.getFolderById(folderId);
-          const files = folder.getFilesByType(MimeType.PDF);
-          
-          const fileList = [];
-          const cutoffDate = new Date();
-          cutoffDate.setDate(cutoffDate.getDate() - 7); // Letzte 7 Tage
-          
-          while (files.hasNext()) {
-            const file = files.next();
-            if (file.getLastUpdated() > cutoffDate) {
-              fileList.push({
-                id: file.getId(),
-                name: file.getName(),
-                modified: file.getLastUpdated().toISOString()
-              });
+          try {
+            // WICHTIG: Ersetze diese ID mit deiner Ordner-ID!
+            const folderId = 'DEINE_ORDNER_ID_HIER';
+            
+            const folder = DriveApp.getFolderById(folderId);
+            const files = folder.getFilesByType(MimeType.PDF);
+            
+            const fileList = [];
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 7); // Letzte 7 Tage
+            
+            while (files.hasNext()) {
+              const file = files.next();
+              if (file.getLastUpdated() > cutoffDate) {
+                fileList.push({
+                  id: file.getId(),
+                  name: file.getName(),
+                  modified: file.getLastUpdated().toISOString()
+                });
+              }
             }
+            
+            // Wichtig: Als JSON zurückgeben
+            return ContentService
+              .createTextOutput(JSON.stringify(fileList))
+              .setMimeType(ContentService.MimeType.JSON);
+              
+          } catch (error) {
+            // Fehler als JSON zurückgeben
+            return ContentService
+              .createTextOutput(JSON.stringify({
+                error: error.toString(),
+                message: "Fehler beim Abrufen der Dateien"
+              }))
+              .setMimeType(ContentService.MimeType.JSON);
           }
-          
-          return ContentService
-            .createTextOutput(JSON.stringify(fileList))
-            .setMimeType(ContentService.MimeType.JSON);
         }
         
         function doPost(e) {
-          const fileId = e.parameter.fileId;
-          const file = DriveApp.getFileById(fileId);
-          const content = file.getBlob().getBytes();
-          
-          return ContentService
-            .createTextOutput(Utilities.base64Encode(content))
-            .setMimeType(ContentService.MimeType.TEXT);
+          try {
+            const fileId = e.parameter.fileId;
+            const file = DriveApp.getFileById(fileId);
+            const content = file.getBlob().getBytes();
+            
+            return ContentService
+              .createTextOutput(Utilities.base64Encode(content))
+              .setMimeType(ContentService.MimeType.TEXT);
+              
+          } catch (error) {
+            return ContentService
+              .createTextOutput(JSON.stringify({
+                error: error.toString()
+              }))
+              .setMimeType(ContentService.MimeType.JSON);
+          }
         }
         ```
         
-        4. **Deploy**: Deploy → New Deployment → Web App → Execute as: Me → Access: Anyone
-        5. **Kopiere die Web App URL**
+        4. **Finde deine Ordner-ID:**
+           - Öffne deinen Zeitungsordner
+           - URL: `https://drive.google.com/drive/folders/XXXXX`
+           - Kopiere `XXXXX` (das ist deine Ordner-ID)
+           - Ersetze `DEINE_ORDNER_ID_HIER` im Script
+        
+        5. **Speichern und Deploy:**
+           - Strg+S zum Speichern
+           - Deploy → New Deployment
+           - Type: **Web app**
+           - Execute as: **Me**
+           - Who has access: **Anyone**
+           - Deploy klicken
+           
+        6. **WICHTIG: Autorisierung**
+           - Beim ersten Deploy: "Review Permissions" klicken
+           - Wähle dein Google-Konto
+           - "Advanced" → "Go to [Scriptname] (unsafe)"
+           - "Allow" klicken
+           
+        7. **Kopiere die Web App URL** (beginnt mit https://script.google.com/macros/s/...)
+        
+        **Teste die URL:**
+        - Öffne die URL in einem neuen Browser-Tab
+        - Du solltest JSON-Daten sehen (Array mit Dateien)
+        - Wenn Fehler: Überprüfe die Ordner-ID
         """)
+    
+    # Test-Button für direkte URL
+    st.markdown("### 🧪 Script testen")
+    
+    test_url = st.text_input(
+        "Teste deine Web App URL direkt:",
+        placeholder="https://script.google.com/macros/s/.../exec"
+    )
+    
+    if test_url and st.button("🔍 URL testen"):
+        try:
+            with st.spinner("Teste URL..."):
+                response = requests.get(test_url)
+                
+                st.info(f"HTTP Status: {response.status_code}")
+                
+                # Zeige Raw Response
+                with st.expander("Raw Response anzeigen"):
+                    st.code(response.text[:1000])
+                
+                # Versuche als JSON zu parsen
+                try:
+                    data = response.json()
+                    st.success("✅ Gültiges JSON erkannt!")
+                    
+                    if isinstance(data, list):
+                        st.write(f"Gefundene Dateien: {len(data)}")
+                        if data:
+                            st.write("Erste Datei:", data[0])
+                    elif 'error' in data:
+                        st.error(f"Script-Fehler: {data['error']}")
+                    else:
+                        st.json(data)
+                        
+                except:
+                    st.error("❌ Kein gültiges JSON. Überprüfe das Script!")
+                    
+        except Exception as e:
+            st.error(f"Verbindungsfehler: {e}")
     
     # Web App URL eingeben
     web_app_url = st.text_input(
@@ -663,7 +748,36 @@ def fetch_and_analyze_apps_script(web_app_url):
         # Dateien abrufen
         with st.spinner("📂 Hole Dateiliste..."):
             response = requests.get(web_app_url)
-            files = response.json()
+            
+            # Debug: Zeige Raw Response
+            if response.status_code != 200:
+                st.error(f"❌ HTTP Fehler: {response.status_code}")
+                st.code(response.text[:500])
+                return
+            
+            # Versuche JSON zu parsen
+            try:
+                files = response.json()
+            except:
+                st.error("❌ Antwort ist kein gültiges JSON")
+                st.code(response.text[:500])
+                
+                # Versuche HTML-Fehler zu erkennen
+                if "<!DOCTYPE" in response.text or "<html" in response.text:
+                    st.error("""
+                    ⚠️ Das Script gibt HTML zurück statt JSON.
+                    
+                    **Mögliche Ursachen:**
+                    1. Die Web App URL ist falsch
+                    2. Das Script wurde nicht deployed
+                    3. Zugriffsfehler
+                    
+                    **Lösung:** 
+                    - Überprüfe die URL
+                    - Stelle sicher, dass das Script deployed ist
+                    - Teste die URL direkt im Browser
+                    """)
+                return
         
         if not files:
             st.warning("Keine Dateien gefunden")
@@ -674,7 +788,7 @@ def fetch_and_analyze_apps_script(web_app_url):
         # Zeige Dateien
         with st.expander("📋 Gefundene Dateien"):
             for file in files:
-                st.write(f"📄 {file['name']}")
+                st.write(f"📄 {file.get('name', 'Unbekannt')}")
         
         # Analyse starten
         if st.button("🚀 Alle Dateien analysieren"):
@@ -687,7 +801,7 @@ def fetch_and_analyze_apps_script(web_app_url):
             for idx, file in enumerate(files):
                 progress = (idx + 1) / len(files)
                 progress_bar.progress(progress)
-                status_text.text(f"Analysiere: {file['name']}")
+                status_text.text(f"Analysiere: {file.get('name', 'Datei')}")
                 
                 try:
                     # Download über Apps Script
@@ -696,10 +810,19 @@ def fetch_and_analyze_apps_script(web_app_url):
                         data={'fileId': file['id']}
                     )
                     
+                    if response.status_code != 200:
+                        st.error(f"Download-Fehler für {file.get('name')}: HTTP {response.status_code}")
+                        continue
+                    
                     # Decode Base64
-                    pdf_content = base64.b64decode(response.text)
+                    try:
+                        pdf_content = base64.b64decode(response.text)
+                    except:
+                        st.error(f"Base64-Dekodierung fehlgeschlagen für {file.get('name')}")
+                        continue
+                        
                     pdf_buffer = io.BytesIO(pdf_content)
-                    pdf_buffer.name = file['name']
+                    pdf_buffer.name = file.get('name', 'unbekannt.pdf')
                     
                     # Text extrahieren
                     text = extract_pdf_text(pdf_buffer)
@@ -709,10 +832,10 @@ def fetch_and_analyze_apps_script(web_app_url):
                         analysis = analyze_with_gemini(text, api_key)
                         
                         # Speichern
-                        save_analysis_to_db(file['name'], analysis, text)
+                        save_analysis_to_db(file.get('name'), analysis, text)
                         
                         all_analyses.append({
-                            'filename': file['name'],
+                            'filename': file.get('name'),
                             'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
                             'analysis': analysis
                         })
@@ -720,7 +843,7 @@ def fetch_and_analyze_apps_script(web_app_url):
                         successful += 1
                         
                 except Exception as e:
-                    st.error(f"Fehler bei {file['name']}: {e}")
+                    st.error(f"Fehler bei {file.get('name', 'Datei')}: {e}")
             
             # Ergebnis
             progress_bar.progress(1.0)
@@ -744,6 +867,8 @@ def fetch_and_analyze_apps_script(web_app_url):
                 
     except Exception as e:
         st.error(f"Fehler: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 def public_folder_integration():
     """Integration für öffentliche Google Drive Ordner"""
