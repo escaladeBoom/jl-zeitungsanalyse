@@ -121,24 +121,32 @@ def analyze_with_gemini(text: str, api_key: str) -> str:
 def analyze_complete_text(text: str, model) -> str:
     """Gesamten Text analysieren und formatiert ausgeben"""
     prompt = f"""
-    AUFTRAG: Analysiere diesen Zeitungstext und finde NUR die WICHTIGSTEN Artikel für die Jungen Liberalen.
+    AUFTRAG: Analysiere diesen Zeitungstext und finde NUR LOKALE/REGIONALE Artikel für die Jungen Liberalen.
     
     WICHTIG: 
+    - NUR Artikel mit Bezug zu DESSAU-ROßLAU oder SACHSEN-ANHALT
+    - IGNORIERE Bundespolitik, internationale Themen, andere Bundesländer
     - Zeige NUR Artikel mit HÖCHSTER oder HOHER Priorität
-    - Ignoriere Standard-Artikel komplett (Sport, Kultur, etc.)
     - Extrahiere IMMER die Seitenzahl aus [SEITE X] Markierungen
     
-    HÖCHSTE PRIORITÄT (🔥):
-    - Kommunalpolitik (Stadtrat, Bürgermeister, lokale Wahlen)
-    - Wirtschaftsförderung & Gewerbeansiedlungen
-    - Bildungspolitik (Schulen, Unis, Digitalisierung)
-    - Verkehr & Infrastruktur
+    HÖCHSTE PRIORITÄT (🔥) - NUR LOKAL/REGIONAL:
+    - Dessau-Roßlauer Stadtrat & Kommunalpolitik
+    - Lokale Wirtschaft & Gewerbeansiedlungen in Dessau-Roßlau
+    - Schulen & Bildung in Dessau-Roßlau und Sachsen-Anhalt
+    - Lokaler Verkehr & Infrastruktur (Straßen, ÖPNV in Dessau)
+    - Landespolitik Sachsen-Anhalt
     
-    HOHE PRIORITÄT (⚡):
-    - Digitalisierung & Innovation
-    - Umwelt & Nachhaltigkeit (pragmatische Ansätze)
-    - Bürgerbeteiligung & Demokratie
-    - Jugendthemen & -beteiligung
+    HOHE PRIORITÄT (⚡) - NUR LOKAL/REGIONAL:
+    - Digitalisierung in Dessau-Roßlau
+    - Lokale Umwelt- & Nachhaltigkeitsprojekte
+    - Bürgerbeteiligung in Dessau-Roßlau
+    - Jugendthemen in der Region
+    
+    IGNORIERE KOMPLETT:
+    - Bundespolitik (Bundestag, Bundesregierung, etc.)
+    - Internationale Themen
+    - Andere Städte/Bundesländer (außer Sachsen-Anhalt)
+    - Sport, Kultur (außer mit politischer Relevanz)
     
     FORMAT FÜR JEDEN ARTIKEL:
     ### [EMOJI] Überschrift des Artikels
@@ -148,7 +156,7 @@ def analyze_complete_text(text: str, model) -> str:
     
     ---
     
-    GEBE NUR DIE WICHTIGSTEN ARTIKEL AUS!
+    GEBE NUR LOKALE/REGIONALE ARTIKEL AUS!
     
     TEXT:
     {text}
@@ -189,15 +197,18 @@ def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
         with st.spinner(f"🔍 Analysiere Teil {i}/{len(chunks)}..."):
             
             chunk_prompt = f"""
-            AUFTRAG: Extrahiere NUR WICHTIGE Artikel aus diesem Zeitungstext-Teil für die Jungen Liberalen.
+            AUFTRAG: Extrahiere NUR LOKALE/REGIONALE Artikel aus diesem Zeitungstext-Teil für die Jungen Liberalen.
             
             WICHTIG: 
+            - NUR Artikel über DESSAU-ROßLAU oder SACHSEN-ANHALT
+            - KEINE Bundespolitik oder internationale Themen
             - Nur HÖCHSTE und HOHE Priorität
             - Seitenzahlen aus [SEITE X] extrahieren
-            - Kurz und präzise
             
-            HÖCHSTE PRIORITÄT: Kommunalpolitik, Wirtschaft, Bildung, Verkehr
-            HOHE PRIORITÄT: Digitalisierung, Umwelt, Bürgerbeteiligung, Jugend
+            HÖCHSTE PRIORITÄT: Dessau-Roßlauer Stadtrat, lokale Wirtschaft, Schulen in Dessau, Verkehr in Dessau, Landespolitik Sachsen-Anhalt
+            HOHE PRIORITÄT: Digitalisierung in Dessau, lokale Umweltprojekte, Bürgerbeteiligung Dessau, regionale Jugendthemen
+            
+            IGNORIERE: Bundespolitik, andere Städte/Länder, Sport, Kultur
             
             FORMAT PRO ARTIKEL:
             TITEL: [Überschrift]
@@ -256,16 +267,16 @@ def parse_articles_from_response(response_text: str) -> list:
 def create_final_summary(articles: list) -> str:
     """Erstelle finale formatierte Zusammenfassung"""
     if not articles:
-        return "❌ Keine relevanten Artikel gefunden."
+        return "❌ Keine relevanten lokalen/regionalen Artikel gefunden."
     
     # Sortiere nach Priorität
     hoechste = [a for a in articles if 'Höchste' in a.get('kategorie', '')]
     hohe = [a for a in articles if 'Hohe' in a.get('kategorie', '')]
     
-    output = "# 📰 ANALYSE-ERGEBNIS\n\n"
+    output = "# 📰 ANALYSE-ERGEBNIS - DESSAU-ROßLAU & SACHSEN-ANHALT\n\n"
     
     # Zusammenfassung
-    output += f"**Gefunden:** {len(articles)} relevante Artikel\n"
+    output += f"**Gefunden:** {len(articles)} relevante lokale/regionale Artikel\n"
     output += f"- 🔥 Höchste Priorität: {len(hoechste)}\n"
     output += f"- ⚡ Hohe Priorität: {len(hohe)}\n\n"
     output += "---\n\n"
