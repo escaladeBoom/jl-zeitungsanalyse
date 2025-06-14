@@ -5,6 +5,7 @@ import io
 import pandas as pd
 from datetime import datetime
 import hashlib
+import re
 
 # Konfiguration mit Fallback
 def get_credentials():
@@ -78,18 +79,12 @@ def extract_pdf_text(pdf_file) -> str:
         
         for page_num, page in enumerate(pdf_reader.pages, 1):
             page_text = page.extract_text()
-            page_texts.append(f"=== SEITE {page_num} ===\n{page_text}\n")
-            text += page_text + "\n\n"
-            
-            # Debug: Zeige Text-Länge pro Seite
-            st.write(f"Seite {page_num}: {len(page_text)} Zeichen")
+            # Füge Seitenmarkierung hinzu
+            page_texts.append(f"\n[SEITE {page_num}]\n{page_text}")
+            text += f"\n[SEITE {page_num}]\n{page_text}\n"
         
         # Gesamt-Info
         st.success(f"✅ Extrahiert: {len(text)} Zeichen aus {total_pages} Seiten")
-        
-        # Zeige ersten Teil zur Kontrolle
-        with st.expander("🔍 Extrahierter Text (erste 1000 Zeichen)"):
-            st.text(text[:1000] + "..." if len(text) > 1000 else text)
         
         return text
         
@@ -114,7 +109,7 @@ def analyze_with_gemini(text: str, api_key: str) -> str:
         if text_length <= max_chunk_size:
             # Kurzer Text - normale Analyse
             st.info("✅ Text passt in ein Stück - normale Analyse")
-            return analyze_single_chunk(text, model)
+            return analyze_complete_text(text, model)
         else:
             # Langer Text - in Chunks aufteilen
             st.warning(f"⚠️ Text zu lang ({text_length} Zeichen) - wird in Teile aufgeteilt")
@@ -123,86 +118,61 @@ def analyze_with_gemini(text: str, api_key: str) -> str:
     except Exception as e:
         return f"❌ **Analyse-Fehler:** {str(e)}"
 
-def analyze_single_chunk(text: str, model) -> str:
-    """Einzelnen Text-Chunk analysieren"""
+def analyze_complete_text(text: str, model) -> str:
+    """Gesamten Text analysieren und formatiert ausgeben"""
     prompt = f"""
-    AUFTRAG: Analysiere diesen Zeitungstext und kategorisiere alle gefundenen Artikel für die Jungen Liberalen (JuLi).
-
-    KATEGORIEN:
-    🔥 HÖCHSTE PRIORITÄT (Sofort handeln):
-    - Kommunalpolitik (Stadtrat, Bürgermeister, lokale Wahlen)
-    - Wirtschaft & Gewerbe (Ansiedlungen, Arbeitsplätze, Startups)
-    - Bildung (Schulen, Unis, Digitalisierung)
-    - Verkehr & Infrastruktur (ÖPNV, Radwege, Straßen)
-
-    ⚡ HOHE PRIORITÄT (Wichtig für JuLi):
-    - Digitalisierung & Innovation
-    - Umwelt & Nachhaltigkeit (pragmatische Lösungen)
-    - Bürgerbeteiligung & Demokratie
-    - Jugendthemen
-
-    📰 STANDARD (Beobachten):
-    - Kultur & Events
-    - Sport
-    - Soziales
-    - Sonstiges
-
-    FORMAT - SORTIERT NACH PRIORITÄT:
+    AUFTRAG: Analysiere diesen Zeitungstext und finde NUR die WICHTIGSTEN Artikel für die Jungen Liberalen.
     
-    # 🔥 HÖCHSTE PRIORITÄT
-    **[KATEGORIE]** - Überschrift
-    📍 Kurze Zusammenfassung (1-2 Sätze)
-    📄 Seite: [Seitennummer falls erkennbar]
-    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
-    ---
-
-    # ⚡ HOHE PRIORITÄT  
-    **[KATEGORIE]** - Überschrift
-    📍 Kurze Zusammenfassung (1-2 Sätze)
-    📄 Seite: [Seitennummer falls erkennbar]
-    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
-    ---
-
-    # 📰 STANDARD
-    **[KATEGORIE]** - Überschrift
-    📍 Kurze Zusammenfassung (1-2 Sätze)
-    📄 Seite: [Seitennummer falls erkennbar]
-    🎯 JuLi-Relevanz: Warum wichtig für Junge Liberale
-    ---
-
     WICHTIG: 
-    - Gruppiere ALLE Artikel nach Prioritätsstufen
-    - Versuche Seitennummern zu identifizieren (z.B. "=== SEITE 3 ===" oder aus dem Kontext)
-    - Verwende "JuLi" statt "JL"
-
+    - Zeige NUR Artikel mit HÖCHSTER oder HOHER Priorität
+    - Ignoriere Standard-Artikel komplett (Sport, Kultur, etc.)
+    - Extrahiere IMMER die Seitenzahl aus [SEITE X] Markierungen
+    
+    HÖCHSTE PRIORITÄT (🔥):
+    - Kommunalpolitik (Stadtrat, Bürgermeister, lokale Wahlen)
+    - Wirtschaftsförderung & Gewerbeansiedlungen
+    - Bildungspolitik (Schulen, Unis, Digitalisierung)
+    - Verkehr & Infrastruktur
+    
+    HOHE PRIORITÄT (⚡):
+    - Digitalisierung & Innovation
+    - Umwelt & Nachhaltigkeit (pragmatische Ansätze)
+    - Bürgerbeteiligung & Demokratie
+    - Jugendthemen & -beteiligung
+    
+    FORMAT FÜR JEDEN ARTIKEL:
+    ### [EMOJI] Überschrift des Artikels
+    **Seite:** [Nummer]
+    **Kernaussage:** [1-2 Sätze - Was ist die wichtigste Information?]
+    **JuLi-Relevanz:** [1 Satz - Warum sollten JuLis hier aktiv werden?]
+    
+    ---
+    
+    GEBE NUR DIE WICHTIGSTEN ARTIKEL AUS!
+    
     TEXT:
     {text}
     """
     
     response = model.generate_content(prompt)
-    return response.text
+    return format_final_output(response.text)
 
 def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
     """Langen Text in Chunks aufteilen und analysieren"""
     
-    # Text in Chunks aufteilen (versuche bei Absätzen zu trennen)
+    # Text in Chunks aufteilen
     chunks = []
     current_pos = 0
     
     while current_pos < len(text):
         end_pos = min(current_pos + chunk_size, len(text))
         
-        # Versuche bei Absatz oder Satz zu trennen
+        # Versuche bei Seitenmarkierung zu trennen
         if end_pos < len(text):
-            # Suche letzten Absatz in diesem Chunk
-            last_paragraph = text.rfind('\n\n', current_pos, end_pos)
-            if last_paragraph > current_pos:
-                end_pos = last_paragraph
-            else:
-                # Falls kein Absatz, suche letzten Satz
-                last_sentence = text.rfind('.', current_pos, end_pos)
-                if last_sentence > current_pos:
-                    end_pos = last_sentence + 1
+            # Suche letzte Seitenmarkierung
+            last_page_marker = text.rfind('[SEITE', current_pos, end_pos)
+            if last_page_marker > current_pos:
+                end_pos = last_page_marker
         
         chunk = text[current_pos:end_pos].strip()
         if chunk:
@@ -212,99 +182,135 @@ def analyze_chunked_text(text: str, model, chunk_size: int) -> str:
     
     st.info(f"📄 Text aufgeteilt in {len(chunks)} Teile")
     
-    # Jeden Chunk einzeln analysieren
-    all_analyses = []
+    # Sammle alle Artikel aus allen Chunks
+    all_articles = []
     
     for i, chunk in enumerate(chunks, 1):
-        st.write(f"🔍 Analysiere Teil {i}/{len(chunks)}...")
-        
-        chunk_prompt = f"""
-        AUFTRAG: Analysiere diesen Zeitungstext-Teil und kategorisiere alle gefundenen Artikel für die Jungen Liberalen (JuLi).
-        WICHTIG: Dies ist Teil {i} von {len(chunks)} - analysiere nur die vollständigen Artikel in diesem Teil.
-
-        KATEGORIEN:
-        🔥 HÖCHSTE PRIORITÄT: Kommunalpolitik, Wirtschaft & Gewerbe, Bildung, Verkehr & Infrastruktur
-        ⚡ HOHE PRIORITÄT: Digitalisierung & Innovation, Umwelt & Nachhaltigkeit, Bürgerbeteiligung & Demokratie, Jugendthemen
-        📰 STANDARD: Kultur & Events, Sport, Soziales, Sonstiges
-
-        FORMAT - NUR ARTIKEL AUFLISTEN (keine Gruppierung):
-        **[KATEGORIE]** - Überschrift
-        📍 Zusammenfassung
-        📄 Seite: [Nummer falls erkennbar]
-        🎯 JuLi-Relevanz: [Begründung]
-        ---
-
-        WICHTIG: Verwende "JuLi" statt "JL" und versuche Seitennummern zu extrahieren.
-
-        TEXT TEIL {i}:
-        {chunk}
-        """
-        
-        try:
-            response = model.generate_content(chunk_prompt)
-            chunk_analysis = response.text
-            all_analyses.append(chunk_analysis)
-        except Exception as e:
-            all_analyses.append(f"❌ Fehler bei Teil {i}: {e}")
+        with st.spinner(f"🔍 Analysiere Teil {i}/{len(chunks)}..."):
+            
+            chunk_prompt = f"""
+            AUFTRAG: Extrahiere NUR WICHTIGE Artikel aus diesem Zeitungstext-Teil für die Jungen Liberalen.
+            
+            WICHTIG: 
+            - Nur HÖCHSTE und HOHE Priorität
+            - Seitenzahlen aus [SEITE X] extrahieren
+            - Kurz und präzise
+            
+            HÖCHSTE PRIORITÄT: Kommunalpolitik, Wirtschaft, Bildung, Verkehr
+            HOHE PRIORITÄT: Digitalisierung, Umwelt, Bürgerbeteiligung, Jugend
+            
+            FORMAT PRO ARTIKEL:
+            TITEL: [Überschrift]
+            SEITE: [Nummer]
+            KATEGORIE: [Höchste/Hohe Priorität]
+            INHALT: [Kernaussage in 1-2 Sätzen]
+            RELEVANZ: [JuLi-Relevanz in 1 Satz]
+            ===
+            
+            TEXT TEIL {i}:
+            {chunk}
+            """
+            
+            try:
+                response = model.generate_content(chunk_prompt)
+                # Parse die Artikel aus der Antwort
+                articles = parse_articles_from_response(response.text)
+                all_articles.extend(articles)
+            except Exception as e:
+                st.error(f"Fehler bei Teil {i}: {e}")
     
-    # Alle Analysen nach Priorität sortieren
-    combined_text = '\n\n'.join(all_analyses)
-    
-    final_analysis = f"""
-# 📰 VOLLSTÄNDIGE ZEITUNGSANALYSE
-*Analysiert in {len(chunks)} Teilen - Sortiert nach Priorität*
+    # Erstelle finale Ausgabe
+    return create_final_summary(all_articles)
 
-{sort_articles_by_priority(combined_text)}
+def parse_articles_from_response(response_text: str) -> list:
+    """Extrahiere strukturierte Artikel aus der KI-Antwort"""
+    articles = []
+    
+    # Teile nach === auf
+    raw_articles = response_text.split('===')
+    
+    for raw_article in raw_articles:
+        if not raw_article.strip():
+            continue
+            
+        article = {}
+        lines = raw_article.strip().split('\n')
+        
+        for line in lines:
+            if line.startswith('TITEL:'):
+                article['titel'] = line.replace('TITEL:', '').strip()
+            elif line.startswith('SEITE:'):
+                article['seite'] = line.replace('SEITE:', '').strip()
+            elif line.startswith('KATEGORIE:'):
+                article['kategorie'] = line.replace('KATEGORIE:', '').strip()
+            elif line.startswith('INHALT:'):
+                article['inhalt'] = line.replace('INHALT:', '').strip()
+            elif line.startswith('RELEVANZ:'):
+                article['relevanz'] = line.replace('RELEVANZ:', '').strip()
+        
+        if 'titel' in article:  # Nur hinzufügen wenn Titel vorhanden
+            articles.append(article)
+    
+    return articles
+
+def create_final_summary(articles: list) -> str:
+    """Erstelle finale formatierte Zusammenfassung"""
+    if not articles:
+        return "❌ Keine relevanten Artikel gefunden."
+    
+    # Sortiere nach Priorität
+    hoechste = [a for a in articles if 'Höchste' in a.get('kategorie', '')]
+    hohe = [a for a in articles if 'Hohe' in a.get('kategorie', '')]
+    
+    output = "# 📰 ANALYSE-ERGEBNIS\n\n"
+    
+    # Zusammenfassung
+    output += f"**Gefunden:** {len(articles)} relevante Artikel\n"
+    output += f"- 🔥 Höchste Priorität: {len(hoechste)}\n"
+    output += f"- ⚡ Hohe Priorität: {len(hohe)}\n\n"
+    output += "---\n\n"
+    
+    # Höchste Priorität
+    if hoechste:
+        output += "## 🔥 HÖCHSTE PRIORITÄT - Sofort handeln!\n\n"
+        for article in hoechste:
+            output += format_article(article, "🔥")
+    
+    # Hohe Priorität
+    if hohe:
+        output += "## ⚡ HOHE PRIORITÄT - Wichtig für JuLis\n\n"
+        for article in hohe:
+            output += format_article(article, "⚡")
+    
+    return output
+
+def format_article(article: dict, emoji: str) -> str:
+    """Formatiere einzelnen Artikel"""
+    output = f"### {emoji} {article.get('titel', 'Unbekannter Titel')}\n"
+    output += f"**📄 Seite:** {article.get('seite', 'k.A.')}\n"
+    output += f"**📍 Kernaussage:** {article.get('inhalt', 'Keine Zusammenfassung verfügbar')}\n"
+    output += f"**🎯 JuLi-Relevanz:** {article.get('relevanz', 'Relevant für liberale Kommunalpolitik')}\n"
+    output += "\n---\n\n"
+    return output
+
+def format_final_output(raw_output: str) -> str:
+    """Formatiere die finale Ausgabe schöner"""
+    # Zähle Artikel
+    hoechste_count = raw_output.count("🔥")
+    hohe_count = raw_output.count("⚡")
+    
+    # Füge Zusammenfassung hinzu
+    summary = f"""# 📰 ANALYSE-ERGEBNIS
+
+**Gefunden:** {hoechste_count + hohe_count} relevante Artikel
+- 🔥 Höchste Priorität: {hoechste_count}
+- ⚡ Hohe Priorität: {hohe_count}
 
 ---
-**📊 ZUSAMMENFASSUNG:** {len(chunks)} Teile analysiert, {len(text)} Zeichen Gesamttext
+
 """
     
-    return final_analysis
-
-def sort_articles_by_priority(analysis_text: str) -> str:
-    """Sortiert Artikel aus der Analyse nach Priorität"""
-    try:
-        # Extrahiere alle Artikel aus dem Text
-        articles = analysis_text.split('---')
-        
-        hoechste = []
-        hohe = []
-        standard = []
-        
-        for article in articles:
-            article = article.strip()
-            if not article:
-                continue
-                
-            # Bestimme Priorität basierend auf Kategorien
-            if any(cat in article for cat in ['Kommunalpolitik', 'Wirtschaft & Gewerbe', 'Bildung', 'Verkehr & Infrastruktur']):
-                hoechste.append(article)
-            elif any(cat in article for cat in ['Digitalisierung & Innovation', 'Umwelt & Nachhaltigkeit', 'Bürgerbeteiligung & Demokratie', 'Jugendthemen']):
-                hohe.append(article)
-            else:
-                standard.append(article)
-        
-        # Zusammenbauen
-        result = ""
-        
-        if hoechste:
-            result += "# 🔥 HÖCHSTE PRIORITÄT\n\n"
-            result += "\n---\n".join(hoechste) + "\n\n"
-        
-        if hohe:
-            result += "# ⚡ HOHE PRIORITÄT\n\n"
-            result += "\n---\n".join(hohe) + "\n\n"
-        
-        if standard:
-            result += "# 📰 STANDARD\n\n"
-            result += "\n---\n".join(standard) + "\n\n"
-        
-        return result
-        
-    except Exception as e:
-        # Falls Sortierung fehlschlägt, gib ursprünglichen Text zurück
-        return f"📋 ARTIKEL-ANALYSE:\n\n{analysis_text}"
+    return summary + raw_output
 
 def show_login():
     """Login-Seite anzeigen"""
@@ -360,45 +366,44 @@ def analyze_tab():
     pdf_file = st.file_uploader(
         "📄 Zeitungs-PDF hochladen:",
         type=['pdf'],
-        help="Lokale Zeitungen, Gemeindeblatts, etc."
+        help="Lokale Zeitungen, Gemeindeblätter, etc."
     )
     
     if pdf_file:
-        st.success(f"✅ **{pdf_file.name}** hochgeladen ({pdf_file.size} Bytes)")
+        st.success(f"✅ **{pdf_file.name}** hochgeladen ({pdf_file.size:,} Bytes)")
         
         # PDF analysieren
-        if st.button("🔍 Zeitung analysieren", type="primary"):
+        if st.button("🔍 Zeitung analysieren", type="primary", disabled=not api_key):
             if api_key:
                 with st.spinner("📖 PDF wird gelesen..."):
                     text = extract_pdf_text(pdf_file)
                 
                 if text.strip():
-                    with st.spinner("🤖 KI analysiert Artikel..."):
+                    with st.spinner("🤖 KI analysiert relevante Artikel..."):
                         analysis = analyze_with_gemini(text, api_key)
                     
                     # Ergebnis anzeigen
                     st.success("✅ Analyse abgeschlossen!")
                     st.markdown("---")
-                    st.markdown("## 📋 Analyseergebnis:")
+                    
+                    # Analyse in schönem Format
                     st.markdown(analysis)
                     
                     # In Database speichern
                     if save_analysis_to_db(pdf_file.name, analysis, text):
                         st.success("💾 Artikel in Database gespeichert!")
-                    else:
-                        st.info("ℹ️ Artikel bereits in Database vorhanden")
                     
                     # Download-Option
                     st.download_button(
-                        label="📥 Analyse herunterladen",
-                        data=f"# JL Zeitungsanalyse - {pdf_file.name}\n\n{analysis}",
-                        file_name=f"JL_Analyse_{pdf_file.name}_{datetime.now().strftime('%Y%m%d')}.md",
+                        label="📥 Analyse als Markdown herunterladen",
+                        data=f"# JL Zeitungsanalyse - {pdf_file.name}\n\nDatum: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
+                        file_name=f"JL_Analyse_{pdf_file.name.replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
                         mime="text/markdown"
                     )
                 else:
                     st.error("❌ Kein Text im PDF gefunden!")
             else:
-                st.warning("⚠️ API-Key benötigt!")
+                st.warning("⚠️ Bitte API-Key in der Sidebar eingeben!")
 
 def search_tab():
     """Tab für Artikel-Suche in der Database"""
@@ -446,35 +451,32 @@ def search_tab():
     
     if not filtered_df.empty:
         # Sortierung
-        sort_by = st.selectbox("Sortieren nach:", ["Datum (neu-alt)", "PDF-Name", "Datum (alt-neu)"])
+        sort_by = st.selectbox("Sortieren nach:", ["Datum (neu→alt)", "PDF-Name", "Datum (alt→neu)"])
         
-        if sort_by == "Datum (neu-alt)":
+        if sort_by == "Datum (neu→alt)":
             filtered_df = filtered_df.sort_values('datum', ascending=False)
         elif sort_by == "PDF-Name":
             filtered_df = filtered_df.sort_values('pdf_name')
         else:
             filtered_df = filtered_df.sort_values('datum', ascending=True)
         
-        # Artikel anzeigen - OHNE NESTED EXPANDERS
+        # Artikel anzeigen
         for idx, row in filtered_df.iterrows():
-            st.markdown("---")
-            st.markdown(f"### 📰 {row['pdf_name']}")
-            st.markdown(f"**📅 Datum:** {row['datum']}")
-            st.markdown("**🔍 Analyse:**")
-            st.markdown(row['analyse'])
-            
-            # Volltext als Button + Text Area (NICHT als Expander)
-            if st.button(f"📖 Volltext anzeigen/verstecken", key=f"toggle_{idx}"):
-                if f"show_text_{idx}" not in st.session_state:
-                    st.session_state[f"show_text_{idx}"] = True
-                else:
-                    st.session_state[f"show_text_{idx}"] = not st.session_state[f"show_text_{idx}"]
-            
-            if st.session_state.get(f"show_text_{idx}", False):
-                st.markdown("**📄 Volltext-Vorschau:**")
-                st.text_area("", value=row['volltext_kurz'], height=150, key=f"text_{idx}", disabled=True)
+            with st.container():
+                st.markdown("---")
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown(f"### 📰 {row['pdf_name']}")
+                with col2:
+                    st.markdown(f"📅 {pd.to_datetime(row['datum']).strftime('%d.%m.%Y')}")
+                
+                # Analyse in Container
+                with st.container():
+                    st.markdown(row['analyse'])
         
         # Export-Option
+        st.markdown("---")
         csv_data = filtered_df.to_csv(index=False)
         st.download_button(
             label="📥 Suchergebnisse als CSV exportieren",
@@ -482,8 +484,6 @@ def search_tab():
             file_name=f"JL_Artikel_Export_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
-    else:
-        st.info("🔍 Keine Artikel gefunden. Versuche andere Suchbegriffe.")
 
 def stats_tab():
     """Tab für Statistiken"""
@@ -511,35 +511,61 @@ def stats_tab():
         st.metric("📄 Verschiedene PDFs", unique_pdfs)
     
     with col4:
-        avg_per_day = len(df) / max(1, (pd.to_datetime(df['datum']).max() - pd.to_datetime(df['datum']).min()).days + 1) if len(df) > 1 else len(df)
-        st.metric("📈 Ø Artikel/Tag", f"{avg_per_day:.1f}")
+        # Artikel mit hoher/höchster Priorität zählen
+        high_prio_count = df['analyse'].str.contains('🔥|⚡', na=False).sum()
+        st.metric("🎯 Relevante Artikel", high_prio_count)
     
-    # Top PDFs
-    st.markdown("### 🏆 Meistanalysierte Zeitungen")
-    pdf_counts = df['pdf_name'].value_counts().head(10)
-    if not pdf_counts.empty:
-        st.bar_chart(pdf_counts)
+    # Top Themen
+    st.markdown("### 🏆 Top Themen in den Analysen")
     
-    # Keyword-Analyse (einfach)
-    st.markdown("### 🔤 Häufige Begriffe in Analysen")
+    # Themen-Keywords definieren
+    themes = {
+        'Kommunalpolitik': ['Stadtrat', 'Bürgermeister', 'Gemeinderat', 'Kommune'],
+        'Verkehr': ['Verkehr', 'ÖPNV', 'Mobilität', 'Straße', 'Radweg'],
+        'Digitalisierung': ['Digital', 'Internet', 'Online', 'IT'],
+        'Bildung': ['Schule', 'Bildung', 'Universität', 'Studium'],
+        'Wirtschaft': ['Wirtschaft', 'Unternehmen', 'Gewerbe', 'Arbeitsplätze'],
+        'Umwelt': ['Umwelt', 'Klima', 'Nachhaltigkeit', 'Energie']
+    }
+    
+    theme_counts = {}
     all_text = ' '.join(df['analyse'].astype(str))
-    keywords = ['Stadtrat', 'Bürgermeister', 'Verkehr', 'Digitalisierung', 'Bildung', 'Wirtschaft', 'Umwelt', 'Kultur']
-    keyword_counts = {kw: all_text.lower().count(kw.lower()) for kw in keywords}
-    keyword_df = pd.DataFrame(list(keyword_counts.items()), columns=['Keyword', 'Häufigkeit'])
-    keyword_df = keyword_df[keyword_df['Häufigkeit'] > 0].sort_values('Häufigkeit', ascending=False)
     
-    if not keyword_df.empty:
-        st.bar_chart(keyword_df.set_index('Keyword'))
+    for theme, keywords in themes.items():
+        count = sum(all_text.lower().count(kw.lower()) for kw in keywords)
+        if count > 0:
+            theme_counts[theme] = count
+    
+    if theme_counts:
+        theme_df = pd.DataFrame(list(theme_counts.items()), columns=['Thema', 'Erwähnungen'])
+        theme_df = theme_df.sort_values('Erwähnungen', ascending=False)
+        st.bar_chart(theme_df.set_index('Thema'))
+    
+    # Zeitverlauf
+    st.markdown("### 📈 Analysen im Zeitverlauf")
+    df['datum_date'] = pd.to_datetime(df['datum']).dt.date
+    timeline = df.groupby('datum_date').size().reset_index(name='Anzahl')
+    if len(timeline) > 1:
+        st.line_chart(timeline.set_index('datum_date'))
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.title("📰 JL Zeitungsanalyse")
-    st.markdown("*Automatische Kategorisierung für Kommunalpolitik*")
+    st.set_page_config(
+        page_title="JL Zeitungsanalyse",
+        page_icon="📰",
+        layout="wide"
+    )
     
-    # Logout Button
-    if st.button("🚪 Logout"):
-        st.session_state.logged_in = False
-        st.rerun()
+    st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
+    st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
+    
+    # User Info & Logout
+    col1, col2 = st.columns([6, 1])
+    with col2:
+        st.markdown(f"👤 {st.session_state.get('username', 'User')}")
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.logged_in = False
+            st.rerun()
     
     # Tab-Navigation
     tab1, tab2, tab3 = st.tabs(["📤 Neue Analyse", "🔍 Artikel-Suche", "📊 Statistiken"])
@@ -555,6 +581,13 @@ def main_app():
 
 def main():
     """Hauptfunktion mit Session State Management"""
+    
+    # Page Config
+    st.set_page_config(
+        page_title="JL Zeitungsanalyse",
+        page_icon="📰",
+        layout="wide"
+    )
     
     # Session State initialisieren
     if 'logged_in' not in st.session_state:
