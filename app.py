@@ -10,9 +10,9 @@ import re
 # Konfiguration mit Fallback
 def get_credentials():
     try:
-        return {"jl_team": st.secrets["JL_PASSWORD"]}
+        return {"juli_team": st.secrets["JL_PASSWORD"]}
     except:
-        return {"jl_team": "junge_liberale_2025"}  # Fallback für Testing
+        return {"juli_team": "junge_liberale_2025"}  # Fallback für Testing
 
 TEAM_CREDENTIALS = get_credentials()
 
@@ -325,7 +325,7 @@ def format_final_output(raw_output: str) -> str:
 
 def show_login():
     """Login-Seite anzeigen"""
-    st.title("🔐 JL Zeitungsanalyse - Login")
+    st.title("🔐 JuLi Zeitungsanalyse - Login")
     
     with st.form("login_form"):
         username = st.text_input("👤 Benutzername:")
@@ -340,7 +340,7 @@ def show_login():
             else:
                 st.error("❌ Falsche Anmeldedaten!")
     
-    st.info("💡 **Demo-Zugang:** jl_team / junge_liberale_2025")
+    st.info("💡 **Demo-Zugang:** juli_team / junge_liberale_2025")
 
 def analyze_tab():
     """Tab für neue Artikel-Analyse"""
@@ -561,7 +561,7 @@ def stats_tab():
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
+    st.title("📰 JuLi Zeitungsanalyse für Kommunalpolitik")
     st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
     
     # User Info & Logout
@@ -589,7 +589,7 @@ def main():
     
     # Page Config MUSS als allererstes kommen
     st.set_page_config(
-        page_title="JL Zeitungsanalyse",
+        page_title="JuLi Zeitungsanalyse",
         page_icon="📰",
         layout="wide"
     )
