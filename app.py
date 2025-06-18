@@ -124,7 +124,7 @@ def analyze_with_gemini(text: str, api_key: str) -> str:
 def analyze_complete_text(text: str, model) -> str:
     """Gesamten Text analysieren und formatiert ausgeben"""
     prompt = f"""
-    AUFTRAG: Analysiere diesen Zeitungstext und finde NUR LOKALE/REGIONALE Artikel für die Jungen Liberalen.
+    AUFTRAG: Analysiere diesen Zeitungstext und finde NUR LOKALE/REGIONALE Artikel für die Jungen Liberalen. Bitte beachte das die erste Seite immer die Titelseite ist, daher themen nicht doppelt aufnehmen!
     
     WICHTIG: 
     - NUR Artikel mit Bezug zu DESSAU-ROßLAU oder SACHSEN-ANHALT
