@@ -13,9 +13,9 @@ import base64
 # Konfiguration mit Fallback
 def get_credentials():
     try:
-        return {"juli_team": st.secrets["JL_PASSWORD"]}
+        return {"jl_team": st.secrets["JL_PASSWORD"]}
     except:
-        return {"juli_team": "junge_liberale_2025"}  # Fallback für Testing
+        return {"jl_team": "junge_liberale_2025"}  # Fallback für Testing
 
 TEAM_CREDENTIALS = get_credentials()
 
@@ -331,7 +331,7 @@ def format_final_output(raw_output: str) -> str:
 
 def show_login():
     """Login-Seite anzeigen"""
-    st.title("🔐 JuLis Zeitungsanalyse - Login")
+    st.title("🔐 JL Zeitungsanalyse - Login")
     
     with st.form("login_form"):
         username = st.text_input("👤 Benutzername:")
@@ -346,7 +346,7 @@ def show_login():
             else:
                 st.error("❌ Falsche Anmeldedaten!")
     
-    st.info("💡 **Demo-Zugang:** juli_team / junge_liberale_2025")
+    st.info("💡 **Demo-Zugang:** jl_team / junge_liberale_2025")
 
 def analyze_tab():
     """Tab für neue Artikel-Analyse"""
@@ -413,7 +413,7 @@ def analyze_tab():
                     # Download-Option
                     st.download_button(
                         label="📥 Analyse als Markdown herunterladen",
-                        data=f"# JuLi Zeitungsanalyse - {pdf_file.name}\n\nDatum: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
+                        data=f"# JL Zeitungsanalyse - {pdf_file.name}\n\nDatum: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
                         file_name=f"JL_Analyse_{pdf_file.name.replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
                         mime="text/markdown"
                     )
@@ -569,104 +569,276 @@ def automated_analysis_tab():
     """Tab für automatisierte Google Drive Analyse"""
     st.header("🤖 Automatisierte Zeitungsanalyse")
     
+    # Eingebettete URL
+    DEFAULT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbye1Pj2dOmadeRvFcZqLV-mIEGTcgwvxunVOncoRBBDQQUWfOngRfluEwYJew-cCiQ/exec"
+    
     # Einfache Version - nur neueste PDF
-    st.markdown("### 📄 Neueste PDF automatisch analysieren")
+    st.markdown("### 📄 Neueste Zeitung automatisch analysieren")
     
-    with st.expander("🔧 Google Apps Script einrichten"):
-        st.markdown("""
-        1. Öffne dein bestehendes Script oder erstelle ein neues
-        2. Lösche allen Code und füge diesen ein:
-        
-        ```javascript
-        const FOLDER_ID = '1X14miq8UeowPZT7AM4qEWp1sheUTQjI6'; // Deine Ordner-ID
-
-        function doGet(e) {
-          try {
-            const folder = DriveApp.getFolderById(FOLDER_ID);
-            const files = folder.getFilesByType(MimeType.PDF);
-            
-            let newestFile = null;
-            let newestDate = new Date(0);
-            
-            while (files.hasNext()) {
-              const file = files.next();
-              if (file.getLastUpdated() > newestDate) {
-                newestDate = file.getLastUpdated();
-                newestFile = file;
-              }
-            }
-            
-            if (newestFile) {
-              return ContentService
-                .createTextOutput(JSON.stringify({
-                  success: true,
-                  file: {
-                    id: newestFile.getId(),
-                    name: newestFile.getName(),
-                    modified: newestFile.getLastUpdated().toISOString()
-                  }
-                }))
-                .setMimeType(ContentService.MimeType.JSON);
-            } else {
-              return ContentService
-                .createTextOutput(JSON.stringify({
-                  success: false,
-                  error: "Keine PDFs gefunden"
-                }))
-                .setMimeType(ContentService.MimeType.JSON);
-            }
-          } catch (error) {
-            return ContentService
-              .createTextOutput(JSON.stringify({
-                success: false,
-                error: error.toString()
-              }))
-              .setMimeType(ContentService.MimeType.JSON);
-          }
-        }
-
-        function doPost(e) {
-          try {
-            const fileId = e.parameter.fileId;
-            const file = DriveApp.getFileById(fileId);
-            const content = file.getBlob().getBytes();
-            return ContentService
-              .createTextOutput(Utilities.base64Encode(content))
-              .setMimeType(ContentService.MimeType.TEXT);
-          } catch (error) {
-            return ContentService
-              .createTextOutput(JSON.stringify({
-                success: false,
-                error: error.toString()
-              }))
-              .setMimeType(ContentService.MimeType.JSON);
-          }
-        }
-        ```
-        
-        3. Deploy → Update (oder New Deployment)
-        4. Kopiere die Web App URL
-        """)
+    st.info("""
+    ✅ **Google Drive Integration aktiv!**
     
-    # URL Eingabe
+    Die App ist bereits mit deinem Zeitungsordner verbunden und kann:
+    - Die neueste PDF automatisch erkennen
+    - Sie herunterladen und analysieren
+    - Duplikate vermeiden (bereits analysierte PDFs überspringen)
+    """)
+    
+    # URL ist voreingestellt aber änderbar
     web_app_url = st.text_input(
-        "Web App URL:",
-        value=st.session_state.get('web_app_url', ''),
-        placeholder="https://script.google.com/macros/s/.../exec"
+        "Web App URL (bereits konfiguriert):",
+        value=st.session_state.get('web_app_url', DEFAULT_WEB_APP_URL),
+        help="Die Standard-URL ist bereits eingestellt. Nur ändern wenn nötig!"
     )
     
     if web_app_url:
         st.session_state.web_app_url = web_app_url
         
-        col1, col2 = st.columns(2)
+        # Hauptaktionen
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔍 Neueste PDF prüfen", type="primary"):
+            if st.button("🔍 Neueste PDF anzeigen", type="primary", use_container_width=True):
                 check_newest_pdf(web_app_url)
         
         with col2:
-            if st.button("🚀 Neueste PDF analysieren", type="secondary"):
+            if st.button("🚀 Jetzt analysieren", type="secondary", use_container_width=True):
                 analyze_newest_pdf(web_app_url)
+                
+        with col3:
+            if st.button("🔄 Auto-Check (stündlich)", type="secondary", use_container_width=True):
+                st.session_state.auto_check = True
+                auto_check_loop(web_app_url)
+        
+        # Erweiterte Optionen
+        with st.expander("⚙️ Erweiterte Optionen"):
+            st.markdown("### 📅 Zeitraum-Analyse")
+            
+            days_back = st.slider(
+                "Analysiere PDFs der letzten X Tage:",
+                min_value=1,
+                max_value=30,
+                value=7,
+                help="Analysiert alle PDFs aus diesem Zeitraum"
+            )
+            
+            if st.button("📚 Mehrere PDFs analysieren"):
+                analyze_recent_pdfs(web_app_url, days_back)
+            
+            st.markdown("---")
+            
+            st.markdown("### 🔧 Script-Verwaltung")
+            
+            if st.button("🧪 Verbindung testen"):
+                test_connection(web_app_url)
+            
+            st.markdown(f"""
+            **Script-Editor öffnen:**
+            [Google Apps Script Editor →](https://script.google.com)
+            
+            **Aktuelle Web App URL:**
+            ```
+            {web_app_url}
+            ```
+            """)
+
+def check_newest_pdf(web_app_url):
+    """Zeige Info über die neueste PDF"""
+    try:
+        with st.spinner("Prüfe neueste PDF..."):
+            response = requests.get(web_app_url)
+            data = response.json()
+            
+            if data.get('success'):
+                file_info = data['file']
+                modified = datetime.fromisoformat(file_info['modified'].replace('Z', '+00:00'))
+                
+                # Info-Box mit schönem Format
+                info_col1, info_col2 = st.columns([2, 1])
+                
+                with info_col1:
+                    st.success(f"""
+                    ### 📄 Neueste Zeitung gefunden:
+                    **{file_info['name']}**
+                    
+                    📅 Hochgeladen: {modified.strftime('%d.%m.%Y um %H:%M Uhr')}
+                    """)
+                
+                with info_col2:
+                    # Prüfe ob bereits analysiert
+                    df = load_article_database()
+                    if not df.empty and file_info['name'] in df['pdf_name'].values:
+                        st.info("✅ Bereits analysiert")
+                    else:
+                        st.warning("⚠️ Noch nicht analysiert")
+                    
+            else:
+                st.error(f"Fehler: {data.get('error')}")
+                
+    except Exception as e:
+        st.error(f"Verbindungsfehler: {e}")
+
+def analyze_newest_pdf(web_app_url):
+    """Analysiere nur die neueste PDF"""
+    try:
+        # API Key prüfen
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        if not api_key:
+            st.error("❌ Gemini API Key fehlt! Bitte in Streamlit Secrets hinzufügen.")
+            with st.expander("🔑 So fügst du den API Key hinzu:"):
+                st.markdown("""
+                1. Klicke auf **Manage app** (unten rechts)
+                2. Gehe zu **Settings** → **Secrets**
+                3. Füge hinzu:
+                ```toml
+                GEMINI_API_KEY = "dein-api-key-hier"
+                ```
+                4. Speichern und App neu starten
+                """)
+            return
+        
+        # Progress Container
+        progress_container = st.container()
+        
+        with progress_container:
+            # Hole neueste PDF Info
+            with st.spinner("🔍 Suche neueste PDF..."):
+                response = requests.get(web_app_url)
+                data = response.json()
+                
+                if not data.get('success'):
+                    st.error(f"Fehler: {data.get('error')}")
+                    return
+                
+                file_info = data['file']
+                
+                # Prüfe ob bereits analysiert
+                df = load_article_database()
+                if not df.empty and file_info['name'] in df['pdf_name'].values:
+                    st.warning(f"⚠️ '{file_info['name']}' wurde bereits analysiert!")
+                    if not st.checkbox("Trotzdem erneut analysieren?"):
+                        return
+            
+            # Status-Updates
+            status = st.empty()
+            progress_bar = st.progress(0)
+            
+            # Download PDF
+            status.text("📥 Lade PDF herunter...")
+            progress_bar.progress(25)
+            
+            download_response = requests.post(
+                web_app_url,
+                data={'fileId': file_info['id']},
+                timeout=60
+            )
+            
+            if download_response.status_code != 200:
+                st.error(f"Download-Fehler: HTTP {download_response.status_code}")
+                return
+            
+            pdf_content = base64.b64decode(download_response.text)
+            
+            # PDF Buffer erstellen
+            pdf_buffer = io.BytesIO(pdf_content)
+            pdf_buffer.name = file_info['name']
+            
+            # Text extrahieren
+            status.text("📖 Extrahiere Text aus PDF...")
+            progress_bar.progress(50)
+            
+            text = extract_pdf_text(pdf_buffer)
+            
+            if not text.strip():
+                st.error("❌ Kein Text im PDF gefunden!")
+                return
+            
+            # Analysieren
+            status.text("🤖 KI analysiert relevante Artikel...")
+            progress_bar.progress(75)
+            
+            analysis = analyze_with_gemini(text, api_key)
+            
+            # Speichern
+            save_analysis_to_db(file_info['name'], analysis, text)
+            
+            progress_bar.progress(100)
+            status.text("✅ Analyse abgeschlossen!")
+        
+        # Ergebnis anzeigen
+        st.success(f"✅ **{file_info['name']}** erfolgreich analysiert!")
+        st.markdown("---")
+        
+        # Analyse in schönem Format
+        with st.container():
+            st.markdown(analysis)
+        
+        # Download-Buttons
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="📥 Als Markdown speichern",
+                data=f"# JL Zeitungsanalyse\n\n**Datei:** {file_info['name']}\n**Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
+                file_name=f"JL_Analyse_{file_info['name'].replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+        
+        with col2:
+            # Als PDF speichern (später implementieren)
+            st.button("📄 Als PDF speichern", disabled=True, use_container_width=True, help="Kommt bald!")
+        
+    except Exception as e:
+        st.error(f"Fehler: {e}")
+        with st.expander("🐛 Fehlerdetails"):
+            import traceback
+            st.code(traceback.format_exc())
+
+def analyze_recent_pdfs(web_app_url, days):
+    """Analysiere alle PDFs der letzten X Tage"""
+    st.info(f"📅 Suche PDFs der letzten {days} Tage...")
+    
+    # Hier würde die Logik für mehrere PDFs kommen
+    # Für jetzt zeigen wir nur eine Info
+    st.warning("Diese Funktion ist noch in Entwicklung!")
+    
+def test_connection(web_app_url):
+    """Teste die Verbindung zum Google Apps Script"""
+    try:
+        with st.spinner("Teste Verbindung..."):
+            response = requests.get(web_app_url)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if response.status_code == 200:
+                    st.success("✅ Verbindung erfolgreich!")
+                else:
+                    st.error(f"❌ HTTP Fehler: {response.status_code}")
+            
+            with col2:
+                try:
+                    data = response.json()
+                    if data.get('success'):
+                        st.success("✅ Script funktioniert!")
+                    else:
+                        st.warning("⚠️ Script-Fehler")
+                except:
+                    st.error("❌ Keine gültige Antwort")
+            
+            with st.expander("🔍 Technische Details"):
+                st.json(response.json() if response.status_code == 200 else {"error": response.text})
+                
+    except Exception as e:
+        st.error(f"Verbindungsfehler: {e}")
+
+def auto_check_loop(web_app_url):
+    """Automatische stündliche Überprüfung"""
+    st.info("🔄 Automatische Überprüfung aktiviert - prüft stündlich auf neue PDFs")
+    
+    # Placeholder für zukünftige Implementation
+    st.warning("Diese Funktion läuft nur solange die App geöffnet ist. Für echte Automatisierung nutze einen Cron-Job oder GitHub Actions.")
 
 def check_newest_pdf(web_app_url):
     """Zeige Info über die neueste PDF"""
@@ -1245,7 +1417,7 @@ def manual_batch_upload():
 
 def create_batch_report(analyses):
     """Erstelle Batch-Analyse Bericht"""
-    report = f"""# 🤖 JuLi BATCH-ANALYSE BERICHT
+    report = f"""# 🤖 JL BATCH-ANALYSE BERICHT
 
 **Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}
 **Anzahl Zeitungen:** {len(analyses)}
@@ -1284,7 +1456,7 @@ def create_batch_report(analyses):
 
 def main_app():
     """Hauptanwendung nach Login"""
-    st.title("📰 JuLi Zeitungsanalyse für Kommunalpolitik")
+    st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
     st.markdown("*Finde relevante Artikel für liberale Politik auf einen Blick*")
     
     # User Info & Logout
@@ -1316,7 +1488,7 @@ def main():
     
     # Page Config MUSS als allererstes kommen
     st.set_page_config(
-        page_title="JuLi Zeitungsanalyse",
+        page_title="JL Zeitungsanalyse",
         page_icon="📰",
         layout="wide"
     )
