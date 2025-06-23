@@ -1,6 +1,6 @@
-streamlit
-pypdf
-google-generativeai
-pandas
+streamlit==1.29.0
+pypdf==3.17.0
+google-generativeai==0.3.0
+pandas==2.2.2
 requests
-supabase-py==1.0.3
+supabase==2.3.0
