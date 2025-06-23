@@ -1,3 +1,6 @@
 streamlit
 pypdf
 google-generativeai
+pandas
+requests
+supabase==2.0.3
