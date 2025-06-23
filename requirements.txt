@@ -3,4 +3,4 @@ pypdf
 google-generativeai
 pandas
 requests
-supabase==2.3.0
+supabase-py==1.0.3
