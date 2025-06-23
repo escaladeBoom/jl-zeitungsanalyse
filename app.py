@@ -9,6 +9,21 @@ import re
 import requests
 import time
 import base64
+from supabase import create_client, Client
+import os
+
+# Supabase Setup
+@st.cache_resource
+def init_supabase() -> Client:
+    """Initialisiere Supabase Client mit Caching"""
+    url = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+    key = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
+    
+    if not url or not key:
+        st.error("❌ Supabase Credentials fehlen! Bitte in Secrets hinzufügen.")
+        st.stop()
+    
+    return create_client(url, key)
 
 # Konfiguration mit Fallback
 def get_credentials():
@@ -19,54 +34,209 @@ def get_credentials():
 
 TEAM_CREDENTIALS = get_credentials()
 
-# Database-Funktionen
-def save_analysis_to_db(pdf_name: str, analysis_text: str, full_text: str):
-    """Analyseergebnis in CSV-Database speichern"""
+# Neue Database-Funktionen mit Supabase
+def save_analysis_to_db(pdf_name: str, analysis_text: str, full_text: str) -> bool:
+    """Speichere Analyse in Supabase"""
     try:
-        # Eindeutige ID für Artikel basierend auf Text-Hash
-        article_hash = hashlib.md5(full_text.encode()).hexdigest()[:12]
+        supabase = init_supabase()
         
-        # Daten für CSV
+        # Eindeutige ID basierend auf Text-Hash
+        article_hash = hashlib.md5(full_text.encode()).hexdigest()[:32]
+        
+        # Zähle Prioritäten
+        highest_priority = analysis_text.count('🔥')
+        high_priority = analysis_text.count('⚡')
+        
+        # Extrahiere Datum aus PDF-Name (falls vorhanden)
+        pdf_date = None
+        date_match = re.search(r'(\d{1,2})[-._](\d{1,2})[-._](\d{2,4})', pdf_name)
+        if date_match:
+            day, month, year = date_match.groups()
+            if len(year) == 2:
+                year = '20' + year
+            try:
+                pdf_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+            except:
+                pass
+        
+        # Daten für Insert
         data = {
-            'id': article_hash,
-            'datum': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'article_hash': article_hash,
             'pdf_name': pdf_name,
-            'analyse': analysis_text,
-            'volltext_kurz': full_text[:500] + "..." if len(full_text) > 500 else full_text
+            'pdf_date': pdf_date,
+            'analysis': analysis_text,
+            'full_text': full_text[:10000] if len(full_text) > 10000 else full_text,  # Limit für Performance
+            'highest_priority_count': highest_priority,
+            'high_priority_count': high_priority,
+            'metadata': {
+                'text_length': len(full_text),
+                'analysis_length': len(analysis_text),
+                'import_source': 'streamlit_app'
+            }
         }
         
-        # CSV laden oder erstellen
-        try:
-            df = pd.read_csv('jl_artikel_database.csv')
-        except:
-            df = pd.DataFrame(columns=['id', 'datum', 'pdf_name', 'analyse', 'volltext_kurz'])
+        # Upsert (Insert oder Update wenn bereits vorhanden)
+        result = supabase.table('jl_articles').upsert(
+            data, 
+            on_conflict='article_hash'
+        ).execute()
         
-        # Duplikat-Check
-        if article_hash not in df['id'].values:
-            df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
-            df.to_csv('jl_artikel_database.csv', index=False)
-            return True
-        return False
+        return True
         
     except Exception as e:
-        st.error(f"Database-Fehler: {e}")
+        st.error(f"❌ Supabase Fehler: {str(e)}")
         return False
 
 def load_article_database():
-    """Artikel-Database laden"""
+    """Lade alle Artikel aus Supabase"""
     try:
-        return pd.read_csv('jl_artikel_database.csv')
-    except:
-        return pd.DataFrame(columns=['id', 'datum', 'pdf_name', 'analyse', 'volltext_kurz'])
+        supabase = init_supabase()
+        
+        # Hole alle Artikel, sortiert nach Datum
+        response = supabase.table('jl_articles').select("*").order(
+            'created_at', desc=True
+        ).execute()
+        
+        # Konvertiere zu DataFrame
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Formatiere Datum für Anzeige
+            df['datum'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+            # Kürze full_text für Anzeige
+            df['volltext_kurz'] = df['full_text'].apply(
+                lambda x: x[:500] + "..." if x and len(x) > 500 else x
+            )
+            return df[['id', 'datum', 'pdf_name', 'analysis', 'volltext_kurz', 
+                      'highest_priority_count', 'high_priority_count', 'pdf_date']]
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Fehler beim Laden: {str(e)}")
+        return pd.DataFrame()
 
-def search_articles(query: str, df: pd.DataFrame):
-    """Artikel durchsuchen"""
-    if query:
-        mask = df['analyse'].str.contains(query, case=False, na=False) | \
-               df['pdf_name'].str.contains(query, case=False, na=False) | \
-               df['volltext_kurz'].str.contains(query, case=False, na=False)
-        return df[mask]
-    return df
+def search_articles(query: str, df=None):
+    """Durchsuche Artikel mit Volltextsuche"""
+    try:
+        supabase = init_supabase()
+        
+        if not query:
+            # Wenn keine Suche, gib alle zurück
+            return load_article_database()
+        
+        # Nutze PostgreSQL Volltextsuche
+        response = supabase.table('jl_articles').select("*").text_search(
+            'search_vector', 
+            query,
+            config='german'  # Deutsche Sprachkonfiguration
+        ).order('created_at', desc=True).execute()
+        
+        if response.data:
+            df = pd.DataFrame(response.data)
+            df['datum'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+            df['volltext_kurz'] = df['full_text'].apply(
+                lambda x: x[:500] + "..." if x and len(x) > 500 else x
+            )
+            return df
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ Suchfehler: {str(e)}")
+        # Fallback auf lokale Suche wenn df übergeben wurde
+        if df is not None and not df.empty:
+            mask = df['analysis'].str.contains(query, case=False, na=False) | \
+                   df['pdf_name'].str.contains(query, case=False, na=False)
+            return df[mask]
+        return pd.DataFrame()
+
+def get_article_stats():
+    """Hole Statistiken aus der View"""
+    try:
+        supabase = init_supabase()
+        
+        # Gesamtstatistiken
+        total_response = supabase.table('jl_articles').select(
+            "count"
+        ).execute()
+        
+        # Statistiken nach Datum
+        stats_response = supabase.table('jl_article_stats').select("*").execute()
+        
+        return {
+            'total_count': total_response.count if hasattr(total_response, 'count') else 0,
+            'daily_stats': pd.DataFrame(stats_response.data) if stats_response.data else pd.DataFrame()
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Statistik-Fehler: {str(e)}")
+        return {'total_count': 0, 'daily_stats': pd.DataFrame()}
+
+def check_duplicate(pdf_name: str) -> bool:
+    """Prüfe ob PDF bereits analysiert wurde"""
+    try:
+        supabase = init_supabase()
+        
+        response = supabase.table('jl_articles').select("id").eq(
+            'pdf_name', pdf_name
+        ).execute()
+        
+        return len(response.data) > 0
+        
+    except Exception as e:
+        return False
+
+# Migration Helper
+def migrate_from_csv_to_supabase():
+    """Migriere bestehende CSV-Daten zu Supabase"""
+    try:
+        # Versuche CSV zu laden
+        if os.path.exists('jl_artikel_database.csv'):
+            import pandas as pd
+            old_df = pd.read_csv('jl_artikel_database.csv')
+            
+            supabase = init_supabase()
+            migrated = 0
+            
+            progress_bar = st.progress(0)
+            status = st.empty()
+            
+            for idx, row in old_df.iterrows():
+                progress = (idx + 1) / len(old_df)
+                progress_bar.progress(progress)
+                status.text(f"Migriere {idx + 1}/{len(old_df)}: {row['pdf_name']}")
+                
+                try:
+                    # Bereite Daten vor
+                    data = {
+                        'article_hash': row.get('id', hashlib.md5(row['pdf_name'].encode()).hexdigest()[:32]),
+                        'pdf_name': row['pdf_name'],
+                        'analysis': row.get('analyse', row.get('analysis', '')),
+                        'full_text': row.get('volltext_kurz', '').replace('...', ''),
+                        'created_at': pd.to_datetime(row['datum']).isoformat() if 'datum' in row else None,
+                        'metadata': {'migrated_from_csv': True}
+                    }
+                    
+                    # Insert in Supabase
+                    supabase.table('jl_articles').upsert(
+                        data,
+                        on_conflict='article_hash'
+                    ).execute()
+                    
+                    migrated += 1
+                    
+                except Exception as e:
+                    st.warning(f"Fehler bei {row['pdf_name']}: {e}")
+            
+            progress_bar.progress(1.0)
+            status.text(f"✅ Migration abgeschlossen: {migrated}/{len(old_df)} Artikel")
+            
+            # Backup alte CSV
+            os.rename('jl_artikel_database.csv', 'jl_artikel_database_backup.csv')
+            st.success(f"✅ {migrated} Artikel erfolgreich migriert!")
+            
+    except Exception as e:
+        st.error(f"Migrationsfehler: {e}")
 
 def extract_pdf_text(pdf_file) -> str:
     """PDF-Text extrahieren mit verbesserter Multi-Page Unterstützung"""
@@ -490,7 +660,7 @@ def search_tab():
                 
                 # Analyse in Container
                 with st.container():
-                    st.markdown(row['analyse'])
+                    st.markdown(row['analysis'])
         
         # Export-Option
         st.markdown("---")
@@ -529,8 +699,8 @@ def stats_tab():
     
     with col4:
         # Artikel mit hoher/höchster Priorität zählen
-        high_prio_count = df['analyse'].str.contains('🔥|⚡', na=False).sum()
-        st.metric("🎯 Relevante Artikel", high_prio_count)
+        total_high_prio = df['highest_priority_count'].sum() + df['high_priority_count'].sum()
+        st.metric("🎯 Relevante Artikel", total_high_prio)
     
     # Top Themen
     st.markdown("### 🏆 Top Themen in den Analysen")
@@ -546,7 +716,7 @@ def stats_tab():
     }
     
     theme_counts = {}
-    all_text = ' '.join(df['analyse'].astype(str))
+    all_text = ' '.join(df['analysis'].astype(str))
     
     for theme, keywords in themes.items():
         count = sum(all_text.lower().count(kw.lower()) for kw in keywords)
@@ -666,8 +836,7 @@ def check_newest_pdf(web_app_url):
                 
                 with info_col2:
                     # Prüfe ob bereits analysiert
-                    df = load_article_database()
-                    if not df.empty and file_info['name'] in df['pdf_name'].values:
+                    if check_duplicate(file_info['name']):
                         st.info("✅ Bereits analysiert")
                     else:
                         st.warning("⚠️ Noch nicht analysiert")
@@ -713,8 +882,7 @@ def analyze_newest_pdf(web_app_url):
                 file_info = data['file']
                 
                 # Prüfe ob bereits analysiert
-                df = load_article_database()
-                if not df.empty and file_info['name'] in df['pdf_name'].values:
+                if check_duplicate(file_info['name']):
                     st.warning(f"⚠️ '{file_info['name']}' wurde bereits analysiert!")
                     if not st.checkbox("Trotzdem erneut analysieren?"):
                         return
@@ -839,121 +1007,6 @@ def auto_check_loop(web_app_url):
     
     # Placeholder für zukünftige Implementation
     st.warning("Diese Funktion läuft nur solange die App geöffnet ist. Für echte Automatisierung nutze einen Cron-Job oder GitHub Actions.")
-
-def check_newest_pdf(web_app_url):
-    """Zeige Info über die neueste PDF"""
-    try:
-        with st.spinner("Prüfe neueste PDF..."):
-            response = requests.get(web_app_url)
-            data = response.json()
-            
-            if data.get('success'):
-                file_info = data['file']
-                modified = datetime.fromisoformat(file_info['modified'].replace('Z', '+00:00'))
-                
-                st.success(f"""
-                ### 📄 Neueste PDF gefunden:
-                - **Name:** {file_info['name']}
-                - **Geändert:** {modified.strftime('%d.%m.%Y %H:%M')}
-                - **ID:** {file_info['id']}
-                """)
-                
-                # Prüfe ob bereits analysiert
-                df = load_article_database()
-                if not df.empty and file_info['name'] in df['pdf_name'].values:
-                    st.info("ℹ️ Diese PDF wurde bereits analysiert!")
-                else:
-                    st.warning("⚠️ Diese PDF wurde noch nicht analysiert!")
-                    
-            else:
-                st.error(f"Fehler: {data.get('error')}")
-                
-    except Exception as e:
-        st.error(f"Fehler: {e}")
-
-def analyze_newest_pdf(web_app_url):
-    """Analysiere nur die neueste PDF"""
-    try:
-        # API Key prüfen
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
-        if not api_key:
-            st.error("❌ Gemini API Key fehlt!")
-            return
-        
-        # Hole neueste PDF Info
-        with st.spinner("Hole neueste PDF..."):
-            response = requests.get(web_app_url)
-            data = response.json()
-            
-            if not data.get('success'):
-                st.error(f"Fehler: {data.get('error')}")
-                return
-            
-            file_info = data['file']
-            st.info(f"📄 Verarbeite: {file_info['name']}")
-        
-        # Download PDF
-        with st.spinner("Lade PDF herunter..."):
-            download_response = requests.post(
-                web_app_url,
-                data={'fileId': file_info['id']},
-                timeout=60
-            )
-            
-            if download_response.status_code != 200:
-                st.error(f"Download-Fehler: HTTP {download_response.status_code}")
-                return
-            
-            # Prüfe ob Fehler-JSON
-            try:
-                error_check = download_response.json()
-                if 'error' in error_check:
-                    st.error(f"Script-Fehler: {error_check['error']}")
-                    return
-            except:
-                # Kein JSON = gut (Base64 Content)
-                pass
-            
-            pdf_content = base64.b64decode(download_response.text)
-            st.success(f"✅ Download erfolgreich ({len(pdf_content):,} Bytes)")
-        
-        # PDF Buffer erstellen
-        pdf_buffer = io.BytesIO(pdf_content)
-        pdf_buffer.name = file_info['name']
-        
-        # Text extrahieren
-        with st.spinner("Extrahiere Text..."):
-            text = extract_pdf_text(pdf_buffer)
-            
-            if not text.strip():
-                st.error("❌ Kein Text im PDF gefunden!")
-                return
-        
-        # Analysieren
-        with st.spinner("🤖 KI analysiert Artikel..."):
-            analysis = analyze_with_gemini(text, api_key)
-        
-        # Speichern
-        if save_analysis_to_db(file_info['name'], analysis, text):
-            st.success("💾 In Database gespeichert!")
-        
-        # Ergebnis anzeigen
-        st.success("✅ Analyse abgeschlossen!")
-        st.markdown("---")
-        st.markdown(analysis)
-        
-        # Download
-        st.download_button(
-            label="📥 Analyse herunterladen",
-            data=f"# JL Zeitungsanalyse\n\n**Datei:** {file_info['name']}\n**Datum:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n{analysis}",
-            file_name=f"JL_Analyse_{file_info['name'].replace('.pdf', '')}_{datetime.now().strftime('%Y%m%d')}.md",
-            mime="text/markdown"
-        )
-        
-    except Exception as e:
-        st.error(f"Fehler: {e}")
-        import traceback
-        st.code(traceback.format_exc())
 
 def apps_script_integration():
     """Integration über Google Apps Script für private Ordner"""
@@ -1454,6 +1507,45 @@ def create_batch_report(analyses):
     
     return report
 
+def admin_tab():
+    """Admin-Tab für Datenmigration und Wartung"""
+    st.header("🔧 Admin-Bereich")
+    
+    # Migration
+    st.subheader("📦 Daten-Migration")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.info("""
+        Migriere deine bestehenden CSV-Daten zu Supabase.
+        Dies ist nur einmal nötig!
+        """)
+    
+    with col2:
+        if st.button("🚀 Migration starten", type="primary"):
+            migrate_from_csv_to_supabase()
+    
+    # Database Stats
+    st.subheader("📊 Database Status")
+    
+    try:
+        supabase = init_supabase()
+        
+        # Teste Verbindung
+        test_response = supabase.table('jl_articles').select("count", count='exact').limit(1).execute()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Gesamt Artikel", test_response.count if hasattr(test_response, 'count') else 0)
+        with col2:
+            st.metric("Supabase Status", "✅ Verbunden")
+        with col3:
+            st.metric("Projekt", "nzlaljqkjqgnlcbmwbvg")
+    
+    except Exception as e:
+        st.error(f"❌ Supabase Fehler: {str(e)}")
+        st.info("Überprüfe deine Secrets!")
+
 def main_app():
     """Hauptanwendung nach Login"""
     st.title("📰 JL Zeitungsanalyse für Kommunalpolitik")
@@ -1468,7 +1560,7 @@ def main_app():
             st.rerun()
     
     # Tab-Navigation
-    tab1, tab2, tab3, tab4 = st.tabs(["📤 Neue Analyse", "🔍 Artikel-Suche", "📊 Statistiken", "🤖 Automatisierung"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📤 Neue Analyse", "🔍 Artikel-Suche", "📊 Statistiken", "🤖 Automatisierung", "🔧 Admin"])
     
     with tab1:
         analyze_tab()
@@ -1480,8 +1572,10 @@ def main_app():
         stats_tab()
     
     with tab4:
-        # Importiere die Automatisierungs-Funktionen
         automated_analysis_tab()
+    
+    with tab5:
+        admin_tab()
 
 def main():
     """Hauptfunktion mit Session State Management"""
