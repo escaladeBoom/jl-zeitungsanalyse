@@ -9,7 +9,7 @@ import re
 import requests
 import time
 import base64
-from supabase import create_client, Client
+from supabase import create_client, Client 
 import os
 
 # Supabase Setup
