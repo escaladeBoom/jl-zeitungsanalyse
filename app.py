@@ -306,7 +306,7 @@ def analyze_complete_text(text: str, model) -> str:
     - Dessau-Roßlauer Stadtrat & Kommunalpolitik
     - Lokale Wirtschaft & Gewerbeansiedlungen in Dessau-Roßlau
     - Schulen & Bildung in Dessau-Roßlau und Sachsen-Anhalt
-    - Lokaler Verkehr & Infrastruktur (Straßen, ÖPNV in Dessau)
+    - Lokaler Verkehr & Infrastruktur (Straßen, ÖPNV in Dessau) - jedoch nichts mit Verkehrsunfällen 
     - Landespolitik Sachsen-Anhalt
     
     HOHE PRIORITÄT (⚡) - NUR LOKAL/REGIONAL:
@@ -319,7 +319,8 @@ def analyze_complete_text(text: str, model) -> str:
     - Bundespolitik (Bundestag, Bundesregierung, etc.)
     - Internationale Themen
     - Andere Städte/Bundesländer (außer Sachsen-Anhalt)
-    - Sport, Kultur (außer mit politischer Relevanz)
+    - lokaler Sport wie Handball und Fussball, Kultur (außer mit politischer Relevanz)
+    - Alles was keine Politische Relevanz hat - Bewerbungsinformationen oder Diebstahl
     
     FORMAT FÜR JEDEN ARTIKEL:
     ### [EMOJI] Überschrift des Artikels
